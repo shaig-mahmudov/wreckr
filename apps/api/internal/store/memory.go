@@ -20,33 +20,49 @@ const (
 )
 
 type ScenarioRecord struct {
-	ID        string            `json:"id"`
-	Scenario  scenario.Scenario `json:"scenario"`
-	CreatedAt time.Time         `json:"created_at"`
+	ID                   string            `json:"id"`
+	Scenario             scenario.Scenario `json:"scenario"`
+	CurrentVersionID     string            `json:"current_version_id,omitempty"`
+	CurrentVersionNumber int               `json:"current_version_number,omitempty"`
+	CreatedAt            time.Time         `json:"created_at"`
 }
 
 type RunRecord struct {
-	ID         string            `json:"id"`
-	ScenarioID string            `json:"scenario_id,omitempty"`
-	Status     RunStatus         `json:"status"`
-	Scenario   scenario.Scenario `json:"scenario"`
-	Report     *report.Report    `json:"report,omitempty"`
-	Error      string            `json:"error,omitempty"`
-	CreatedAt  time.Time         `json:"created_at"`
-	StartedAt  *time.Time        `json:"started_at,omitempty"`
-	FinishedAt *time.Time        `json:"finished_at,omitempty"`
+	ID                    string            `json:"id"`
+	ScenarioID            string            `json:"scenario_id,omitempty"`
+	ScenarioVersionID     string            `json:"scenario_version_id,omitempty"`
+	ScenarioVersionNumber int               `json:"scenario_version_number,omitempty"`
+	Status                RunStatus         `json:"status"`
+	Scenario              scenario.Scenario `json:"scenario"`
+	Report                *report.Report    `json:"report,omitempty"`
+	Error                 string            `json:"error,omitempty"`
+	CreatedAt             time.Time         `json:"created_at"`
+	StartedAt             *time.Time        `json:"started_at,omitempty"`
+	FinishedAt            *time.Time        `json:"finished_at,omitempty"`
+}
+
+type ScenarioVersionRecord struct {
+	ID            string            `json:"id"`
+	ScenarioID    string            `json:"scenario_id"`
+	VersionNumber int               `json:"version_number"`
+	Scenario      scenario.Scenario `json:"scenario"`
+	CreatedAt     time.Time         `json:"created_at"`
 }
 
 type Memory struct {
-	mu        sync.RWMutex
-	scenarios map[string]ScenarioRecord
-	runs      map[string]RunRecord
+	mu               sync.RWMutex
+	scenarios        map[string]ScenarioRecord
+	scenarioVersions map[string][]ScenarioVersionRecord
+	runs             map[string]RunRecord
 }
+
+var _ Store = (*Memory)(nil)
 
 func NewMemory() *Memory {
 	return &Memory{
-		scenarios: map[string]ScenarioRecord{},
-		runs:      map[string]RunRecord{},
+		scenarios:        map[string]ScenarioRecord{},
+		scenarioVersions: map[string][]ScenarioVersionRecord{},
+		runs:             map[string]RunRecord{},
 	}
 }
 
@@ -55,9 +71,31 @@ func (m *Memory) CreateScenario(sc scenario.Scenario) ScenarioRecord {
 	defer m.mu.Unlock()
 	now := time.Now().UTC()
 	id := fmt.Sprintf("scn_%d", now.UnixNano())
-	record := ScenarioRecord{ID: id, Scenario: sc, CreatedAt: now}
+	versionID := fmt.Sprintf("scv_%d", now.UnixNano())
+	version := ScenarioVersionRecord{ID: versionID, ScenarioID: id, VersionNumber: 1, Scenario: sc, CreatedAt: now}
+	record := ScenarioRecord{ID: id, Scenario: sc, CurrentVersionID: versionID, CurrentVersionNumber: 1, CreatedAt: now}
 	m.scenarios[id] = record
+	m.scenarioVersions[id] = []ScenarioVersionRecord{version}
 	return record
+}
+
+func (m *Memory) UpdateScenario(id string, sc scenario.Scenario) (ScenarioRecord, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	record, ok := m.scenarios[id]
+	if !ok {
+		return ScenarioRecord{}, false
+	}
+	now := time.Now().UTC()
+	versionNumber := len(m.scenarioVersions[id]) + 1
+	versionID := fmt.Sprintf("scv_%d", now.UnixNano())
+	version := ScenarioVersionRecord{ID: versionID, ScenarioID: id, VersionNumber: versionNumber, Scenario: sc, CreatedAt: now}
+	m.scenarioVersions[id] = append(m.scenarioVersions[id], version)
+	record.Scenario = sc
+	record.CurrentVersionID = versionID
+	record.CurrentVersionNumber = versionNumber
+	m.scenarios[id] = record
+	return record, true
 }
 
 func (m *Memory) GetScenario(id string) (ScenarioRecord, bool) {
@@ -77,17 +115,36 @@ func (m *Memory) ListScenarios() []ScenarioRecord {
 	return out
 }
 
+func (m *Memory) ListScenarioVersions(id string) []ScenarioVersionRecord {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	versions := m.scenarioVersions[id]
+	out := make([]ScenarioVersionRecord, len(versions))
+	copy(out, versions)
+	return out
+}
+
 func (m *Memory) CreateRun(scenarioID string, sc scenario.Scenario) RunRecord {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now().UTC()
 	id := fmt.Sprintf("run_%d", now.UnixNano())
+	var versionID string
+	var versionNumber int
+	if scenarioID != "" {
+		if record, ok := m.scenarios[scenarioID]; ok {
+			versionID = record.CurrentVersionID
+			versionNumber = record.CurrentVersionNumber
+		}
+	}
 	record := RunRecord{
-		ID:         id,
-		ScenarioID: scenarioID,
-		Status:     RunQueued,
-		Scenario:   sc,
-		CreatedAt:  now,
+		ID:                    id,
+		ScenarioID:            scenarioID,
+		ScenarioVersionID:     versionID,
+		ScenarioVersionNumber: versionNumber,
+		Status:                RunQueued,
+		Scenario:              sc,
+		CreatedAt:             now,
 	}
 	m.runs[id] = record
 	return record
@@ -118,6 +175,8 @@ func (m *Memory) CompleteRun(id string, rep report.Report) {
 	if rep.Status == report.StatusFailed {
 		status = RunFailed
 	}
+	rep.ScenarioVersionID = record.ScenarioVersionID
+	rep.ScenarioVersionNumber = record.ScenarioVersionNumber
 	record.Status = status
 	record.Report = &rep
 	record.FinishedAt = &now

@@ -17,11 +17,11 @@ import (
 
 type Server struct {
 	cfg    config.Config
-	store  *store.Memory
+	store  store.Store
 	runner *runner.Runner
 }
 
-func New(cfg config.Config, st *store.Memory, rn *runner.Runner) *Server {
+func New(cfg config.Config, st store.Store, rn *runner.Runner) *Server {
 	return &Server{cfg: cfg, store: st, runner: rn}
 }
 
@@ -31,6 +31,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /v1/scenarios", s.listScenarios)
 	mux.HandleFunc("POST /v1/scenarios", s.createScenario)
+	mux.HandleFunc("PUT /v1/scenarios/", s.updateScenario)
 	mux.HandleFunc("GET /v1/scenarios/", s.getScenario)
 	mux.HandleFunc("GET /v1/runs", s.listRuns)
 	mux.HandleFunc("POST /v1/runs", s.createRun)
@@ -91,7 +92,43 @@ func (s *Server) listScenarios(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) getScenario(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/v1/scenarios/")
+	if strings.HasSuffix(id, "/versions") {
+		id = strings.TrimSuffix(id, "/versions")
+		versions := s.store.ListScenarioVersions(id)
+		if len(versions) == 0 {
+			writeError(w, http.StatusNotFound, fmt.Errorf("scenario %q not found", id))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"versions": versions})
+		return
+	}
 	record, ok := s.store.GetScenario(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("scenario %q not found", id))
+		return
+	}
+	writeJSON(w, http.StatusOK, record)
+}
+
+func (s *Server) updateScenario(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/v1/scenarios/")
+	if id == "" || strings.Contains(id, "/") {
+		writeError(w, http.StatusNotFound, fmt.Errorf("scenario %q not found", id))
+		return
+	}
+
+	var sc scenario.Scenario
+	if err := readJSON(w, r, s.cfg.MaxBodyBytes, &sc); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	sc = sc.WithEnv().Normalized()
+	if err := sc.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	record, ok := s.store.UpdateScenario(id, sc)
 	if !ok {
 		writeError(w, http.StatusNotFound, fmt.Errorf("scenario %q not found", id))
 		return
