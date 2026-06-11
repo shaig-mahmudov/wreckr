@@ -10,6 +10,8 @@ type Config struct {
 	Addr         string
 	RunTimeout   time.Duration
 	MaxBodyBytes int64
+	StoreBackend string
+	DatabaseURL  string
 }
 
 func FromEnv() Config {
@@ -17,6 +19,8 @@ func FromEnv() Config {
 		Addr:         envString("WRECKR_API_ADDR", ":8080"),
 		RunTimeout:   time.Duration(envInt("WRECKR_RUN_TIMEOUT_SECONDS", 300)) * time.Second,
 		MaxBodyBytes: int64(envInt("WRECKR_MAX_BODY_BYTES", 1<<20)),
+		StoreBackend: envString("WRECKR_STORE", "memory"),
+		DatabaseURL:  envString("DATABASE_URL", "postgres://wreckr:wreckr@localhost:5432/wreckr?sslmode=disable"),
 	}
 }
 
