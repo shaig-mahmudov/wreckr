@@ -7,8 +7,10 @@ import (
 
 type Store interface {
 	CreateScenario(sc scenario.Scenario) ScenarioRecord
+	UpdateScenario(id string, sc scenario.Scenario) (ScenarioRecord, bool)
 	GetScenario(id string) (ScenarioRecord, bool)
 	ListScenarios() []ScenarioRecord
+	ListScenarioVersions(id string) []ScenarioVersionRecord
 
 	CreateRun(scenarioID string, sc scenario.Scenario) RunRecord
 	MarkRunStarted(id string)

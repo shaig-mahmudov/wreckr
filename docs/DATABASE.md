@@ -61,4 +61,6 @@ The initial schema includes:
 
 Scenario versioning is modeled explicitly with immutable `scenario_versions` rows and a nullable `scenarios.current_version_id` pointer.
 
+Runs store both `scenario_id` and `scenario_version_id`, plus a JSON scenario snapshot, so old reports continue to show the exact scenario version that executed even after the scenario is edited.
+
 Run lifecycle state is stored in the `run_status` enum and used by both `runs.status` and `reports.status`.

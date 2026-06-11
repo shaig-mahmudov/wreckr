@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -73,6 +74,49 @@ func TestRunCreateStatusAndReportEndpoints(t *testing.T) {
 	}
 	if rep.Summary.TotalRequests != 1 {
 		t.Fatalf("report total requests = %d, want 1", rep.Summary.TotalRequests)
+	}
+}
+
+func TestScenarioUpdateCreatesVersionWithoutMutatingOldRunReport(t *testing.T) {
+	target := newTargetServer(t)
+	api := newAPIServer(t)
+
+	created := postJSON[store.ScenarioRecord](t, api.URL+"/v1/scenarios", testScenario(target.URL), http.StatusCreated)
+	if created.CurrentVersionNumber != 1 {
+		t.Fatalf("created version = %d, want 1", created.CurrentVersionNumber)
+	}
+
+	run := postJSON[store.RunRecord](t, api.URL+"/v1/runs", map[string]any{
+		"scenario_id": created.ID,
+		"sync":        true,
+	}, http.StatusCreated)
+	if run.ScenarioVersionNumber != 1 {
+		t.Fatalf("run scenario version = %d, want 1", run.ScenarioVersionNumber)
+	}
+	if run.Report == nil || run.Report.ScenarioVersionNumber != 1 {
+		t.Fatalf("run report version = %#v, want version 1", run.Report)
+	}
+
+	updatedScenario := testScenario(target.URL)
+	updatedScenario.Name = "api-integration-scenario-v2"
+	updated := putJSON[store.ScenarioRecord](t, api.URL+"/v1/scenarios/"+created.ID, updatedScenario, http.StatusOK)
+	if updated.CurrentVersionNumber != 2 {
+		t.Fatalf("updated version = %d, want 2", updated.CurrentVersionNumber)
+	}
+
+	versions := getJSON[struct {
+		Versions []store.ScenarioVersionRecord `json:"versions"`
+	}](t, api.URL+"/v1/scenarios/"+created.ID+"/versions", http.StatusOK)
+	if len(versions.Versions) != 2 {
+		t.Fatalf("version count = %d, want 2", len(versions.Versions))
+	}
+
+	oldReport := getJSON[report.Report](t, api.URL+"/v1/runs/"+run.ID+"/report", http.StatusOK)
+	if oldReport.ScenarioVersionNumber != 1 {
+		t.Fatalf("old report version = %d, want 1", oldReport.ScenarioVersionNumber)
+	}
+	if oldReport.Scenario != "api-integration-scenario" {
+		t.Fatalf("old report scenario = %q, want original scenario name", oldReport.Scenario)
 	}
 }
 
@@ -209,6 +253,28 @@ func postRaw(t *testing.T, url string, raw []byte, wantStatus int) []byte {
 	return readResponse(t, resp, wantStatus)
 }
 
+func putJSON[T any](t *testing.T, url string, payload any, wantStatus int) T {
+	t.Helper()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := readResponse(t, resp, wantStatus)
+	var out T
+	decodeJSON(t, body, &out)
+	return out
+}
+
 func getJSON[T any](t *testing.T, url string, wantStatus int) T {
 	t.Helper()
 	raw := getRaw(t, url, wantStatus)
@@ -233,7 +299,7 @@ func readResponse(t *testing.T, resp *http.Response, wantStatus int) []byte {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, wantStatus)
 	}
 	var body bytes.Buffer
-	if _, err := body.ReadFrom(resp.Body); err != nil {
+	if _, err := io.Copy(&body, resp.Body); err != nil {
 		t.Fatal(err)
 	}
 	return body.Bytes()

@@ -42,6 +42,9 @@ func TestPostgresStorePersistsScenariosRunsAndReports(t *testing.T) {
 	if created.ID == "" {
 		t.Fatal("created scenario ID is empty")
 	}
+	if created.CurrentVersionNumber != 1 {
+		t.Fatalf("created scenario version = %d, want 1", created.CurrentVersionNumber)
+	}
 
 	gotScenario, ok := st.GetScenario(created.ID)
 	if !ok {
@@ -60,6 +63,22 @@ func TestPostgresStorePersistsScenariosRunsAndReports(t *testing.T) {
 	}
 	if run.Status != RunQueued {
 		t.Fatalf("initial run status = %s, want %s", run.Status, RunQueued)
+	}
+	if run.ScenarioVersionNumber != 1 {
+		t.Fatalf("run scenario version = %d, want 1", run.ScenarioVersionNumber)
+	}
+
+	updatedScenario := postgresTestScenario()
+	updatedScenario.Name = "postgres-store-test-v2"
+	updated, ok := st.UpdateScenario(created.ID, updatedScenario)
+	if !ok {
+		t.Fatal("scenario update failed")
+	}
+	if updated.CurrentVersionNumber != 2 {
+		t.Fatalf("updated scenario version = %d, want 2", updated.CurrentVersionNumber)
+	}
+	if versions := st.ListScenarioVersions(created.ID); len(versions) != 2 {
+		t.Fatalf("scenario version count = %d, want 2", len(versions))
 	}
 
 	st.MarkRunStarted(run.ID)
@@ -94,6 +113,15 @@ func TestPostgresStorePersistsScenariosRunsAndReports(t *testing.T) {
 	}
 	if completed.Report == nil {
 		t.Fatal("completed run missing report")
+	}
+	if completed.ScenarioVersionNumber != 1 {
+		t.Fatalf("completed run scenario version = %d, want 1", completed.ScenarioVersionNumber)
+	}
+	if completed.Report.ScenarioVersionNumber != 1 {
+		t.Fatalf("completed report scenario version = %d, want 1", completed.Report.ScenarioVersionNumber)
+	}
+	if completed.Report.Scenario != "postgres-store-test" {
+		t.Fatalf("completed report scenario = %q, want original scenario name", completed.Report.Scenario)
 	}
 	if completed.Report.Summary.TotalRequests != 1 {
 		t.Fatalf("report total requests = %d, want 1", completed.Report.Summary.TotalRequests)
