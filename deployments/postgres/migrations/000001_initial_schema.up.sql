@@ -138,10 +138,37 @@ CREATE INDEX runs_target_id_idx ON runs(target_id);
 CREATE INDEX run_events_run_id_sequence_idx ON run_events(run_id, sequence);
 CREATE INDEX reports_run_id_idx ON reports(run_id);
 
-CREATE TRIGGER projects_set_updated_at BEFORE UPDATE ON projects FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-CREATE TRIGGER targets_set_updated_at BEFORE UPDATE ON targets FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-CREATE TRIGGER scenarios_set_updated_at BEFORE UPDATE ON scenarios FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-CREATE TRIGGER scenario_versions_set_updated_at BEFORE UPDATE ON scenario_versions FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-CREATE TRIGGER runs_set_updated_at BEFORE UPDATE ON runs FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-CREATE TRIGGER run_events_set_updated_at BEFORE UPDATE ON run_events FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-CREATE TRIGGER reports_set_updated_at BEFORE UPDATE ON reports FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER projects_set_updated_at
+    BEFORE UPDATE ON projects
+    FOR EACH ROW
+    EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER targets_set_updated_at
+    BEFORE UPDATE ON targets
+    FOR EACH ROW
+    EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER scenarios_set_updated_at
+    BEFORE UPDATE ON scenarios
+    FOR EACH ROW
+    EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER scenario_versions_set_updated_at
+    BEFORE UPDATE ON scenario_versions
+    FOR EACH ROW
+    EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER runs_set_updated_at
+    BEFORE UPDATE ON runs
+    FOR EACH ROW
+    EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER run_events_set_updated_at
+    BEFORE UPDATE ON run_events
+    FOR EACH ROW
+    EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER reports_set_updated_at
+    BEFORE UPDATE ON reports
+    FOR EACH ROW
+    EXECUTE FUNCTION set_updated_at();

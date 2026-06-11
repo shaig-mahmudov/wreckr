@@ -1,41 +1,64 @@
 # Database
 
-Wreckr can run with an in-memory store for local demos or a PostgreSQL-backed store for persistent API state.
+Wreckr uses PostgreSQL for persistent control-plane data.
 
-## Store Backend
+## Migration Tool
 
-Use memory storage:
-
-```bash
-WRECKR_STORE=memory
-```
-
-Use PostgreSQL storage:
-
-```bash
-WRECKR_STORE=postgres
-DATABASE_URL=postgres://wreckr:wreckr@localhost:5432/wreckr?sslmode=disable
-```
-
-## Migrations
-
-Migration files live in:
+Migrations are plain SQL files under:
 
 ```text
 deployments/postgres/migrations
 ```
 
-Start Postgres and apply migrations:
+They are executed with the `migrate/migrate` Docker image through Docker Compose.
+
+## Run Migrations
+
+Start Postgres:
 
 ```bash
 docker compose up -d postgres
+```
+
+Apply all pending migrations:
+
+```bash
 docker compose --profile tools run --rm migrate
 ```
 
-## PostgreSQL Integration Test
+PowerShell helper:
 
-The Postgres store test is opt-in so normal local and CI test runs do not require Docker or a database.
+```powershell
+.\scripts\migrate.ps1 up
+```
+
+Rollback one migration:
+
+```powershell
+.\scripts\migrate.ps1 down 1
+```
+
+## Clean Database Verification
+
+Run migrations against an isolated clean database:
 
 ```bash
-WRECKR_TEST_DATABASE_URL=postgres://wreckr:wreckr@localhost:5432/wreckr_test?sslmode=disable go test ./apps/api/internal/store
+docker compose -p wreckr_migration_test --profile tools run --rm migrate
+docker compose -p wreckr_migration_test down -v
 ```
+
+## Initial Schema
+
+The initial schema includes:
+
+- `projects`
+- `targets`
+- `scenarios`
+- `scenario_versions`
+- `runs`
+- `run_events`
+- `reports`
+
+Scenario versioning is modeled explicitly with immutable `scenario_versions` rows and a nullable `scenarios.current_version_id` pointer.
+
+Run lifecycle state is stored in the `run_status` enum and used by both `runs.status` and `reports.status`.
