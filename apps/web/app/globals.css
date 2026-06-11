@@ -143,7 +143,8 @@ h2 {
 
 .label,
 .toolbar span,
-.metric span {
+.metric span,
+.api-pill span {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 800;
@@ -236,7 +237,8 @@ textarea:focus {
 }
 
 .icon-button,
-.run-button {
+.run-button,
+.text-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -260,6 +262,50 @@ textarea:focus {
   background: var(--green);
   color: white;
   font-weight: 900;
+}
+
+.text-button {
+  height: 32px;
+  margin-left: auto;
+  padding: 0 10px;
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--blue);
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.api-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 112px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.api-pill.connected {
+  border-color: rgba(20, 125, 100, 0.28);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.api-pill.connected span {
+  color: var(--green);
+}
+
+.api-pill.offline {
+  border-color: rgba(191, 45, 69, 0.28);
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.api-pill.offline span {
+  color: var(--red);
 }
 
 .notice {
@@ -300,6 +346,7 @@ textarea:focus {
   line-height: 1;
 }
 
+.run-list,
 .failure-list,
 .json-report {
   border: 1px solid var(--line);
@@ -318,6 +365,91 @@ textarea:focus {
 
 .section-title h2 {
   color: var(--ink);
+}
+
+.run-items {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.run-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 58px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+}
+
+.run-item.selected {
+  border-color: rgba(40, 103, 168, 0.45);
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+.run-item span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.run-item strong,
+.run-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-item strong {
+  font-size: 0.92rem;
+}
+
+.run-item small {
+  color: var(--muted);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.74rem;
+}
+
+.run-item em {
+  flex: 0 0 auto;
+  min-width: 74px;
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.run-item em.passed {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.run-item em.failed,
+.run-item em.errored {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.run-item em.running,
+.run-item em.queued {
+  background: #fff4db;
+  color: var(--amber);
+}
+
+.empty-state {
+  padding: 14px;
+  color: var(--muted);
 }
 
 .failure-list ul {
@@ -371,6 +503,7 @@ textarea:focus {
 
   .run-state,
   .toolbar label,
+  .api-pill,
   .run-button {
     width: 100%;
   }
