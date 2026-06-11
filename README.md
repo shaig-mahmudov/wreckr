@@ -1,0 +1,127 @@
+# Wreckr
+
+**Break your backend before production does.**
+
+Wreckr is a production scenario testing tool for backend systems. It simulates real-world failure scenarios like load spikes, race conditions, duplicate transactions, broken idempotency, retry storms, weak rate limiting, queue backlogs, and slow dependencies.
+
+Unlike unit tests, Wreckr tests a system from the outside under production-like pressure. The tested backend can be written in Go, C#, Java, Node.js, Python, or any other stack.
+
+## Current MVP
+
+This repository now contains the first vertical slice:
+
+- Go scenario engine
+- black-box HTTP runner
+- concurrent, race, burst, spike, and retry-storm traffic modes
+- response and probe-based business invariants
+- latency/error/status reports
+- HTTP API with in-memory run storage
+- CLI runner
+- intentionally vulnerable demo API
+- Next.js dashboard scaffold
+- Docker Compose scaffold for API, demo target, Postgres, Redis, Prometheus, and web
+
+The MVP intentionally keeps the core engine dependency-free. Postgres, Redis + Asynq, object storage, k6, and Kubernetes jobs are planned as the next orchestration layer around this core.
+
+## Quick Start
+
+Run the intentionally vulnerable demo API:
+
+```bash
+go run ./examples/demo-api/cmd
+```
+
+In another terminal, run a production-style idempotency race scenario:
+
+```bash
+go run ./apps/api/cmd/wreckr run ./examples/scenarios/checkout-idempotency-race.json
+```
+
+Expected result: the scenario fails because the demo API creates duplicate orders for simultaneous checkout requests.
+
+Run the Wreckr API:
+
+```bash
+go run ./apps/api/cmd/api
+```
+
+Health check:
+
+```bash
+curl http://localhost:8080/healthz
+```
+
+## Example Scenario
+
+```json
+{
+  "version": 1,
+  "name": "checkout-idempotency-race",
+  "target": {
+    "base_url": "http://localhost:9090"
+  },
+  "traffic": {
+    "type": "race",
+    "concurrency": 2,
+    "iterations": 1
+  },
+  "setup": [
+    {
+      "name": "reset-demo-state",
+      "method": "POST",
+      "path": "/reset",
+      "expect": {
+        "status": [200]
+      }
+    }
+  ],
+  "requests": [
+    {
+      "name": "checkout",
+      "method": "POST",
+      "path": "/checkout",
+      "headers": {
+        "Idempotency-Key": "same-key-123"
+      },
+      "json": {
+        "userId": "user-123",
+        "sku": "item-abc",
+        "quantity": 1
+      },
+      "expect": {
+        "status": [201, 409]
+      }
+    }
+  ],
+  "invariants": [
+    {
+      "name": "only-one-order-created",
+      "type": "http_probe",
+      "method": "GET",
+      "path": "/orders?userId=user-123&sku=item-abc",
+      "expect": {
+        "json_path": "$.count",
+        "equals": 1
+      }
+    }
+  ]
+}
+```
+
+## Architecture Direction
+
+```text
+Next.js dashboard
+        |
+Go API -------------- PostgreSQL
+        |
+Redis + Asynq
+        |
+Runner worker ------- Object storage
+        |
+Docker/k6 today, Kubernetes Jobs later
+        |
+Target backend
+```
+
+See [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the staged implementation plan.
