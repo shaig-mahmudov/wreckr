@@ -97,7 +97,66 @@ func (p *Postgres) CreateScenario(sc scenario.Scenario) ScenarioRecord {
 	}
 
 	record.Scenario = sc
+	record.CurrentVersionID = versionID
+	record.CurrentVersionNumber = 1
 	return record
+}
+
+func (p *Postgres) UpdateScenario(id string, sc scenario.Scenario) (ScenarioRecord, bool) {
+	ctx, cancel := storeContext()
+	defer cancel()
+
+	raw, checksum, err := marshalScenario(sc)
+	if err != nil {
+		return ScenarioRecord{}, false
+	}
+
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ScenarioRecord{}, false
+	}
+	defer rollbackUnlessCommitted(tx)
+
+	var versionNumber int
+	err = tx.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(version_number), 0) + 1
+		FROM scenario_versions
+		WHERE scenario_id = $1
+	`, id).Scan(&versionNumber)
+	if err != nil || versionNumber == 1 {
+		return ScenarioRecord{}, false
+	}
+
+	var versionID string
+	err = tx.QueryRowContext(ctx, `
+		INSERT INTO scenario_versions (scenario_id, version_number, status, definition, checksum)
+		VALUES ($1, $2, 'active', $3, $4)
+		RETURNING id::text
+	`, id, versionNumber, raw, checksum).Scan(&versionID)
+	if err != nil {
+		return ScenarioRecord{}, false
+	}
+
+	var record ScenarioRecord
+	err = tx.QueryRowContext(ctx, `
+		UPDATE scenarios
+		SET name = $2,
+			description = $3,
+			current_version_id = $4
+		WHERE id = $1
+		RETURNING id::text, created_at
+	`, id, sc.Name, sc.Description, versionID).Scan(&record.ID, &record.CreatedAt)
+	if err != nil {
+		return ScenarioRecord{}, false
+	}
+	if err := tx.Commit(); err != nil {
+		return ScenarioRecord{}, false
+	}
+
+	record.Scenario = sc
+	record.CurrentVersionID = versionID
+	record.CurrentVersionNumber = versionNumber
+	return record, true
 }
 
 func (p *Postgres) GetScenario(id string) (ScenarioRecord, bool) {
@@ -107,11 +166,11 @@ func (p *Postgres) GetScenario(id string) (ScenarioRecord, bool) {
 	var record ScenarioRecord
 	var raw []byte
 	err := p.db.QueryRowContext(ctx, `
-		SELECT s.id::text, sv.definition, s.created_at
+		SELECT s.id::text, sv.id::text, sv.version_number, sv.definition, s.created_at
 		FROM scenarios s
 		JOIN scenario_versions sv ON sv.id = s.current_version_id
 		WHERE s.id = $1
-	`, id).Scan(&record.ID, &raw, &record.CreatedAt)
+	`, id).Scan(&record.ID, &record.CurrentVersionID, &record.CurrentVersionNumber, &raw, &record.CreatedAt)
 	if err != nil {
 		return ScenarioRecord{}, false
 	}
@@ -126,7 +185,7 @@ func (p *Postgres) ListScenarios() []ScenarioRecord {
 	defer cancel()
 
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT s.id::text, sv.definition, s.created_at
+		SELECT s.id::text, sv.id::text, sv.version_number, sv.definition, s.created_at
 		FROM scenarios s
 		JOIN scenario_versions sv ON sv.id = s.current_version_id
 		WHERE s.project_id = $1
@@ -141,7 +200,37 @@ func (p *Postgres) ListScenarios() []ScenarioRecord {
 	for rows.Next() {
 		var record ScenarioRecord
 		var raw []byte
-		if err := rows.Scan(&record.ID, &raw, &record.CreatedAt); err != nil {
+		if err := rows.Scan(&record.ID, &record.CurrentVersionID, &record.CurrentVersionNumber, &raw, &record.CreatedAt); err != nil {
+			return nil
+		}
+		if err := json.Unmarshal(raw, &record.Scenario); err != nil {
+			return nil
+		}
+		records = append(records, record)
+	}
+	return records
+}
+
+func (p *Postgres) ListScenarioVersions(id string) []ScenarioVersionRecord {
+	ctx, cancel := storeContext()
+	defer cancel()
+
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT id::text, scenario_id::text, version_number, definition, created_at
+		FROM scenario_versions
+		WHERE scenario_id = $1
+		ORDER BY version_number ASC
+	`, id)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var records []ScenarioVersionRecord
+	for rows.Next() {
+		var record ScenarioVersionRecord
+		var raw []byte
+		if err := rows.Scan(&record.ID, &record.ScenarioID, &record.VersionNumber, &raw, &record.CreatedAt); err != nil {
 			return nil
 		}
 		if err := json.Unmarshal(raw, &record.Scenario); err != nil {
@@ -163,11 +252,13 @@ func (p *Postgres) CreateRun(scenarioID string, sc scenario.Scenario) RunRecord 
 
 	var scenarioParam any
 	var versionParam any
+	var versionNumber int
 	if scenarioID != "" {
-		versionID, ok := p.currentScenarioVersion(ctx, scenarioID)
+		versionID, currentVersionNumber, ok := p.currentScenarioVersion(ctx, scenarioID)
 		if ok {
 			scenarioParam = scenarioID
 			versionParam = versionID
+			versionNumber = currentVersionNumber
 		}
 	}
 
@@ -175,12 +266,13 @@ func (p *Postgres) CreateRun(scenarioID string, sc scenario.Scenario) RunRecord 
 	err = p.db.QueryRowContext(ctx, `
 		INSERT INTO runs (project_id, scenario_id, scenario_version_id, status, scenario_snapshot)
 		VALUES ($1, $2, $3, 'queued', $4)
-		RETURNING id::text, COALESCE(scenario_id::text, ''), status::text, created_at
-	`, p.projectID, scenarioParam, versionParam, raw).Scan(&record.ID, &record.ScenarioID, &record.Status, &record.CreatedAt)
+		RETURNING id::text, COALESCE(scenario_id::text, ''), COALESCE(scenario_version_id::text, ''), status::text, created_at
+	`, p.projectID, scenarioParam, versionParam, raw).Scan(&record.ID, &record.ScenarioID, &record.ScenarioVersionID, &record.Status, &record.CreatedAt)
 	if err != nil {
 		return RunRecord{}
 	}
 	record.Scenario = sc
+	record.ScenarioVersionNumber = versionNumber
 	return record
 }
 
@@ -202,6 +294,11 @@ func (p *Postgres) CompleteRun(id string, rep report.Report) {
 	status := RunPassed
 	if rep.Status == report.StatusFailed {
 		status = RunFailed
+	}
+	run, ok := p.getRun(ctx, id)
+	if ok {
+		rep.ScenarioVersionID = run.ScenarioVersionID
+		rep.ScenarioVersionNumber = run.ScenarioVersionNumber
 	}
 	rawReport, err := json.Marshal(rep)
 	if err != nil {
@@ -314,14 +411,16 @@ func (p *Postgres) ensureDefaultProject(ctx context.Context) error {
 	`, defaultProjectSlug).Scan(&p.projectID)
 }
 
-func (p *Postgres) currentScenarioVersion(ctx context.Context, scenarioID string) (string, bool) {
+func (p *Postgres) currentScenarioVersion(ctx context.Context, scenarioID string) (string, int, bool) {
 	var versionID string
+	var versionNumber int
 	err := p.db.QueryRowContext(ctx, `
-		SELECT current_version_id::text
-		FROM scenarios
-		WHERE id = $1
-	`, scenarioID).Scan(&versionID)
-	return versionID, err == nil
+		SELECT sv.id::text, sv.version_number
+		FROM scenarios s
+		JOIN scenario_versions sv ON sv.id = s.current_version_id
+		WHERE s.id = $1
+	`, scenarioID).Scan(&versionID, &versionNumber)
+	return versionID, versionNumber, err == nil
 }
 
 func (p *Postgres) getRun(ctx context.Context, id string) (RunRecord, bool) {
@@ -331,19 +430,24 @@ func (p *Postgres) getRun(ctx context.Context, id string) (RunRecord, bool) {
 	var finishedAt sql.NullTime
 	var errorText sql.NullString
 	err := p.db.QueryRowContext(ctx, `
-		SELECT id::text,
-			COALESCE(scenario_id::text, ''),
-			status::text,
-			scenario_snapshot,
-			error,
-			created_at,
-			started_at,
-			finished_at
+		SELECT runs.id::text,
+			COALESCE(runs.scenario_id::text, ''),
+			COALESCE(runs.scenario_version_id::text, ''),
+			COALESCE(sv.version_number, 0),
+			runs.status::text,
+			runs.scenario_snapshot,
+			runs.error,
+			runs.created_at,
+			runs.started_at,
+			runs.finished_at
 		FROM runs
-		WHERE id = $1
+		LEFT JOIN scenario_versions sv ON sv.id = runs.scenario_version_id
+		WHERE runs.id = $1
 	`, id).Scan(
 		&record.ID,
 		&record.ScenarioID,
+		&record.ScenarioVersionID,
+		&record.ScenarioVersionNumber,
 		&record.Status,
 		&raw,
 		&errorText,

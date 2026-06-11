@@ -53,17 +53,19 @@ type CheckResult struct {
 }
 
 type Report struct {
-	RunID      string           `json:"run_id"`
-	Scenario   string           `json:"scenario"`
-	Status     Status           `json:"status"`
-	StartedAt  time.Time        `json:"started_at"`
-	FinishedAt time.Time        `json:"finished_at"`
-	DurationMS float64          `json:"duration_ms"`
-	Summary    Summary          `json:"summary"`
-	Thresholds []CheckResult    `json:"thresholds,omitempty"`
-	Invariants []CheckResult    `json:"invariants,omitempty"`
-	Failures   []string         `json:"failures,omitempty"`
-	Responses  []ResponseRecord `json:"responses,omitempty"`
+	RunID                 string           `json:"run_id"`
+	Scenario              string           `json:"scenario"`
+	ScenarioVersionID     string           `json:"scenario_version_id,omitempty"`
+	ScenarioVersionNumber int              `json:"scenario_version_number,omitempty"`
+	Status                Status           `json:"status"`
+	StartedAt             time.Time        `json:"started_at"`
+	FinishedAt            time.Time        `json:"finished_at"`
+	DurationMS            float64          `json:"duration_ms"`
+	Summary               Summary          `json:"summary"`
+	Thresholds            []CheckResult    `json:"thresholds,omitempty"`
+	Invariants            []CheckResult    `json:"invariants,omitempty"`
+	Failures              []string         `json:"failures,omitempty"`
+	Responses             []ResponseRecord `json:"responses,omitempty"`
 }
 
 func Build(runID string, scenarioName string, startedAt time.Time, records []ResponseRecord, thresholds []CheckResult, invariants []CheckResult) Report {
