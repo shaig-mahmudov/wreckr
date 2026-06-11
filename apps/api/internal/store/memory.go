@@ -43,6 +43,8 @@ type Memory struct {
 	runs      map[string]RunRecord
 }
 
+var _ Store = (*Memory)(nil)
+
 func NewMemory() *Memory {
 	return &Memory{
 		scenarios: map[string]ScenarioRecord{},
