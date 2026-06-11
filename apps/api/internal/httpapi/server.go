@@ -17,11 +17,11 @@ import (
 
 type Server struct {
 	cfg    config.Config
-	store  *store.Memory
+	store  store.Store
 	runner *runner.Runner
 }
 
-func New(cfg config.Config, st *store.Memory, rn *runner.Runner) *Server {
+func New(cfg config.Config, st store.Store, rn *runner.Runner) *Server {
 	return &Server{cfg: cfg, store: st, runner: rn}
 }
 
