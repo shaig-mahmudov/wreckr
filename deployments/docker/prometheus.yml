@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: "wreckr-api"
+    static_configs:
+      - targets: ["api:8080"]
+  - job_name: "wreckr-demo-api"
+    static_configs:
+      - targets: ["demo-api:9090"]

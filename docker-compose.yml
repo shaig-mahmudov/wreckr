@@ -1,0 +1,61 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.api
+    environment:
+      WRECKR_API_ADDR: ":8080"
+      WRECKR_RUN_TIMEOUT_SECONDS: "300"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+      - redis
+
+  web:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.web
+    environment:
+      NEXT_PUBLIC_WRECKR_API_URL: "http://localhost:8080"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  demo-api:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.demo-api
+    environment:
+      DEMO_API_ADDR: ":9090"
+    ports:
+      - "9090:9090"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: wreckr
+      POSTGRES_USER: wreckr
+      POSTGRES_PASSWORD: wreckr
+    ports:
+      - "5432:5432"
+    volumes:
+      - wreckr-postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./deployments/docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+volumes:
+  wreckr-postgres:

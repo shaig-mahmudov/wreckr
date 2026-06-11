@@ -1,0 +1,15 @@
+FROM golang:1.23-alpine AS build
+
+WORKDIR /src
+COPY go.mod ./
+COPY examples ./examples
+RUN go build -o /out/demo-api ./examples/demo-api/cmd
+
+FROM alpine:3.21
+
+RUN adduser -D -H wreckr
+USER wreckr
+WORKDIR /app
+COPY --from=build /out/demo-api /app/demo-api
+EXPOSE 9090
+ENTRYPOINT ["/app/demo-api"]
