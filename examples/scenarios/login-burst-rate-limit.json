@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "name": "login-burst-rate-limit",
+  "description": "A burst against login should degrade with 429 responses, not 500s.",
+  "target": {
+    "base_url": "http://localhost:9090"
+  },
+  "traffic": {
+    "type": "burst",
+    "concurrency": 20,
+    "iterations": 40
+  },
+  "setup": [
+    {
+      "name": "reset-demo-state",
+      "method": "POST",
+      "path": "/reset",
+      "expect": {
+        "status": [200]
+      }
+    }
+  ],
+  "requests": [
+    {
+      "name": "login",
+      "method": "POST",
+      "path": "/login",
+      "json": {
+        "email": "user@example.com",
+        "password": "not-real"
+      },
+      "expect": {
+        "status": [200, 429]
+      }
+    }
+  ],
+  "thresholds": {
+    "max_error_rate": 0,
+    "p95_ms": 1000
+  },
+  "invariants": [
+    {
+      "name": "no-500s-during-rate-limit",
+      "type": "response_count",
+      "request": "login",
+      "status": 500,
+      "equals": 0
+    }
+  ]
+}
