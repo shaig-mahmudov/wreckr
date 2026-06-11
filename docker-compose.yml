@@ -40,8 +40,27 @@ services:
       POSTGRES_PASSWORD: wreckr
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wreckr -d wreckr"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     volumes:
       - wreckr-postgres:/var/lib/postgresql/data
+
+  migrate:
+    image: migrate/migrate:v4.17.1
+    profiles:
+      - tools
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./deployments/postgres/migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://wreckr:wreckr@postgres:5432/wreckr?sslmode=disable"
+      - "up"
 
   redis:
     image: redis:7-alpine
