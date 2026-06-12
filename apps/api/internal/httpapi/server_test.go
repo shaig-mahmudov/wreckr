@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -77,6 +78,38 @@ func TestRunCreateStatusAndReportEndpoints(t *testing.T) {
 	if rep.Summary.TotalRequests != 1 {
 		t.Fatalf("report total requests = %d, want 1", rep.Summary.TotalRequests)
 	}
+}
+
+func TestRunCreationWithQueueEnqueuesWithoutInProcessExecution(t *testing.T) {
+	target := newTargetServer(t)
+	queue := &fakeRunQueue{}
+	api := newAPIServerWithConfigAndQueue(t, testConfig(config.Guardrails{
+		MaxConcurrency:      1000,
+		MaxRequestRate:      5000,
+		MaxRunDuration:      5 * time.Second,
+		MaxRequestBodyBytes: 1 << 20,
+	}), queue)
+
+	run := postJSON[store.RunRecord](t, api.URL+"/v1/runs", map[string]any{
+		"scenario": testScenario(target.URL),
+		"sync":     true,
+	}, http.StatusAccepted)
+
+	if run.Status != store.RunQueued {
+		t.Fatalf("run status = %s, want %s", run.Status, store.RunQueued)
+	}
+	if run.Report != nil {
+		t.Fatalf("queued run report = %#v, want nil", run.Report)
+	}
+	if len(queue.ids) != 1 || queue.ids[0] != run.ID {
+		t.Fatalf("queued IDs = %v, want [%s]", queue.ids, run.ID)
+	}
+
+	status := getJSON[store.RunRecord](t, api.URL+"/v1/runs/"+run.ID, http.StatusOK)
+	if status.Status != store.RunQueued {
+		t.Fatalf("status = %s, want %s", status.Status, store.RunQueued)
+	}
+	assertErrorResponse(t, getRaw(t, api.URL+"/v1/runs/"+run.ID+"/report", http.StatusConflict))
 }
 
 func TestScenarioUpdateCreatesVersionWithoutMutatingOldRunReport(t *testing.T) {
@@ -430,12 +463,25 @@ func newAPIServer(t *testing.T) *httptest.Server {
 
 func newAPIServerWithConfig(t *testing.T, cfg config.Config) *httptest.Server {
 	t.Helper()
+	return newAPIServerWithConfigAndQueue(t, cfg, nil)
+}
+
+func newAPIServerWithConfigAndQueue(t *testing.T, cfg config.Config, queue fakeQueue) *httptest.Server {
+	t.Helper()
 	srv := httpapi.New(config.Config{
 		Addr:         cfg.Addr,
 		RunTimeout:   cfg.RunTimeout,
 		MaxBodyBytes: cfg.MaxBodyBytes,
 		Guardrails:   cfg.Guardrails,
 	}, store.NewMemory(), runner.New())
+	if queue != nil {
+		srv = httpapi.NewWithQueue(config.Config{
+			Addr:         cfg.Addr,
+			RunTimeout:   cfg.RunTimeout,
+			MaxBodyBytes: cfg.MaxBodyBytes,
+			Guardrails:   cfg.Guardrails,
+		}, store.NewMemory(), runner.New(), queue)
+	}
 
 	api := httptest.NewServer(srv.Handler())
 	t.Cleanup(api.Close)
@@ -630,4 +676,17 @@ func mustURLHost(t *testing.T, raw string) string {
 		t.Fatal(err)
 	}
 	return parsed.Hostname()
+}
+
+type fakeQueue interface {
+	EnqueueRun(ctx context.Context, runID string) error
+}
+
+type fakeRunQueue struct {
+	ids []string
+}
+
+func (q *fakeRunQueue) EnqueueRun(_ context.Context, runID string) error {
+	q.ids = append(q.ids, runID)
+	return nil
 }

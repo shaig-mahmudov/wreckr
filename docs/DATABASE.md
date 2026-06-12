@@ -32,7 +32,7 @@ docker compose up -d postgres
 Apply all pending migrations:
 
 ```bash
-docker compose --profile tools run --rm migrate
+docker compose run --rm migrate
 ```
 
 PowerShell helper:
@@ -52,7 +52,7 @@ Rollback one migration:
 Run migrations against an isolated clean database:
 
 ```bash
-docker compose -p wreckr_migration_test --profile tools run --rm migrate
+docker compose -p wreckr_migration_test run --rm migrate
 docker compose -p wreckr_migration_test down -v
 ```
 

@@ -4,13 +4,12 @@ WORKDIR /src
 COPY go.mod go.sum ./
 COPY apps ./apps
 COPY examples ./examples
-RUN go build -o /out/wreckr-api ./apps/api/cmd/api
+RUN go build -o /out/wreckr-worker ./apps/api/cmd/worker
 
 FROM alpine:3.21
 
 RUN adduser -D -H wreckr
 USER wreckr
 WORKDIR /app
-COPY --from=build /out/wreckr-api /app/wreckr-api
-EXPOSE 8080
-ENTRYPOINT ["/app/wreckr-api"]
+COPY --from=build /out/wreckr-worker /app/wreckr-worker
+ENTRYPOINT ["/app/wreckr-worker"]

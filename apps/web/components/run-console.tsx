@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { checkoutRaceScenario, loginBurstScenario } from "../lib/sample-scenarios";
 
 type WreckrReport = {
-  status: "passed" | "failed";
+  status: "passed" | "failed" | "canceled";
   scenario: string;
   duration_ms: number;
   summary: {
@@ -26,7 +26,7 @@ type WreckrReport = {
 type RunRecord = {
   id: string;
   scenario_id?: string;
-  status: "queued" | "running" | "passed" | "failed" | "errored";
+  status: "queued" | "running" | "passed" | "failed" | "errored" | "canceled";
   scenario?: {
     name?: string;
   };
@@ -129,7 +129,7 @@ export function RunConsole() {
       const response = await fetch(`${apiURL.replace(/\/$/, "")}/v1/runs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario: parsedScenario, sync: true })
+        body: JSON.stringify({ scenario: parsedScenario, sync: false })
       });
       const payload = (await response.json()) as RunResponse;
       if (!response.ok) {

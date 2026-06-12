@@ -20,6 +20,7 @@ This repository now contains a working MVP control plane and runner:
 - pluggable storage with memory and PostgreSQL implementations
 - immutable scenario versions linked to historical runs and reports
 - run guardrails for concurrency, request rate, duration, request body size, and target allowlists
+- Redis + Asynq background worker orchestration for API-created runs
 - PostgreSQL migrations for the persistent control-plane schema
 - CLI runner
 - intentionally vulnerable demo API
@@ -27,7 +28,7 @@ This repository now contains a working MVP control plane and runner:
 - GitHub Actions CI for backend, frontend, and Docker Compose validation
 - Docker Compose scaffold for API, demo target, Postgres, Redis, Prometheus, and web
 
-The core engine still runs in-process today. Redis + Asynq, object storage, k6, and Kubernetes jobs remain planned as the next orchestration layer around this core.
+The CLI still runs scenarios in-process for local files. API-created runs are enqueued to Redis and executed by the worker. Object storage, k6, and Kubernetes jobs remain planned as later orchestration layers around this core.
 
 ## Quick Start
 
@@ -61,8 +62,14 @@ Use PostgreSQL storage instead of memory:
 
 ```bash
 docker compose up -d postgres
-docker compose --profile tools run --rm migrate
+docker compose run --rm migrate
 WRECKR_STORE=postgres go run ./apps/api/cmd/api
+```
+
+Run the API with the background worker locally:
+
+```bash
+docker compose up api worker redis postgres
 ```
 
 ## Run Guardrails

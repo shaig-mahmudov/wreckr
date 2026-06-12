@@ -436,7 +436,8 @@ textarea:focus {
 }
 
 .run-item em.failed,
-.run-item em.errored {
+.run-item em.errored,
+.run-item em.canceled {
   background: var(--red-soft);
   color: var(--red);
 }
