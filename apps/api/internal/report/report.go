@@ -12,8 +12,9 @@ import (
 type Status string
 
 const (
-	StatusPassed Status = "passed"
-	StatusFailed Status = "failed"
+	StatusPassed   Status = "passed"
+	StatusFailed   Status = "failed"
+	StatusCanceled Status = "canceled"
 )
 
 type ResponseRecord struct {
