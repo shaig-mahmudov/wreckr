@@ -79,12 +79,18 @@ func (r *Runner) runParallel(ctx context.Context, runID string, sc scenario.Scen
 				}
 				for _, req := range sc.Requests {
 					for attempt := 1; attempt <= attempts; attempt++ {
+						if ctx.Err() != nil {
+							return
+						}
 						record := r.executeRequest(ctx, runID, sc, req, iteration, attempt)
 						collector.add(record)
 						if sc.Traffic.Type != scenario.TrafficRetryStorm || sc.Traffic.Retry.BackoffMS <= 0 || attempt == attempts {
 							continue
 						}
 						sleepContext(ctx, time.Duration(sc.Traffic.Retry.BackoffMS)*time.Millisecond)
+						if ctx.Err() != nil {
+							return
+						}
 					}
 				}
 			}
@@ -110,6 +116,9 @@ func (r *Runner) runRace(ctx context.Context, runID string, sc scenario.Scenario
 			return
 		}
 		for _, req := range sc.Requests {
+			if ctx.Err() != nil {
+				return
+			}
 			startLine := make(chan struct{})
 			var wg sync.WaitGroup
 			for racer := 0; racer < sc.Traffic.Concurrency; racer++ {
@@ -120,6 +129,9 @@ func (r *Runner) runRace(ctx context.Context, runID string, sc scenario.Scenario
 					case <-ctx.Done():
 						return
 					case <-startLine:
+					}
+					if ctx.Err() != nil {
+						return
 					}
 					record := r.executeRequest(ctx, runID, sc, req, iteration, racer+1)
 					collector.add(record)
@@ -251,6 +263,9 @@ func (r *Runner) runControlRequests(ctx context.Context, runID string, sc scenar
 	records := make([]report.ResponseRecord, 0, len(requests))
 	checks := make([]report.CheckResult, 0, len(requests))
 	for _, req := range requests {
+		if ctx.Err() != nil {
+			return records, checks
+		}
 		record := r.executeRequest(ctx, runID, sc, req, -1, 1)
 		records = append(records, record)
 		passed := record.Error == ""

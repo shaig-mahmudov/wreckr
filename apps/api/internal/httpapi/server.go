@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wreckr/wreckr/apps/api/internal/config"
+	"github.com/wreckr/wreckr/apps/api/internal/report"
 	"github.com/wreckr/wreckr/apps/api/internal/runner"
 	"github.com/wreckr/wreckr/apps/api/internal/scenario"
 	"github.com/wreckr/wreckr/apps/api/internal/store"
@@ -19,10 +21,20 @@ type Server struct {
 	cfg    config.Config
 	store  store.Store
 	runner *runner.Runner
+
+	cancelMu       sync.Mutex
+	runCancels     map[string]context.CancelFunc
+	cancelRequests map[string]struct{}
 }
 
 func New(cfg config.Config, st store.Store, rn *runner.Runner) *Server {
-	return &Server{cfg: cfg, store: st, runner: rn}
+	return &Server{
+		cfg:            cfg,
+		store:          st,
+		runner:         rn,
+		runCancels:     map[string]context.CancelFunc{},
+		cancelRequests: map[string]struct{}{},
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -35,6 +47,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/scenarios/", s.getScenario)
 	mux.HandleFunc("GET /v1/runs", s.listRuns)
 	mux.HandleFunc("POST /v1/runs", s.createRun)
+	mux.HandleFunc("POST /v1/runs/{id}/cancel", s.cancelRun)
 	mux.HandleFunc("GET /v1/runs/", s.getRun)
 	return withCORS(withJSON(mux))
 }
@@ -50,7 +63,7 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	runs := s.store.ListRuns()
-	var active, passed, failed, errored int
+	var active, passed, failed, errored, canceled int
 	for _, run := range runs {
 		switch run.Status {
 		case store.RunRunning, store.RunQueued:
@@ -61,6 +74,8 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 			failed++
 		case store.RunErrored:
 			errored++
+		case store.RunCanceled:
+			canceled++
 		}
 	}
 	fmt.Fprintf(w, "wreckr_api_up 1\n")
@@ -69,6 +84,7 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, "wreckr_runs_passed_total %d\n", passed)
 	fmt.Fprintf(w, "wreckr_runs_failed_total %d\n", failed)
 	fmt.Fprintf(w, "wreckr_runs_errored_total %d\n", errored)
+	fmt.Fprintf(w, "wreckr_runs_canceled_total %d\n", canceled)
 }
 
 func (s *Server) createScenario(w http.ResponseWriter, r *http.Request) {
@@ -206,16 +222,89 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, record)
 }
 
+func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	record, ok := s.store.GetRun(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("run %q not found", id))
+		return
+	}
+	if !isCancelableRunStatus(record.Status) {
+		writeError(w, http.StatusConflict, fmt.Errorf("run %q cannot be canceled from status %q", id, record.Status))
+		return
+	}
+	if !s.requestRunCancel(id) {
+		writeError(w, http.StatusConflict, fmt.Errorf("run %q is not currently cancellable", id))
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"id": id, "status": store.RunCanceled})
+}
+
 func (s *Server) executeRun(parent context.Context, id string, sc scenario.Scenario) {
-	s.store.MarkRunStarted(id)
 	ctx, cancel := context.WithTimeout(parent, s.cfg.RunTimeout)
+	s.registerRunCancel(id, cancel)
 	defer cancel()
+
+	s.store.MarkRunStarted(id)
 	rep, err := s.runner.Run(ctx, sc)
+	if s.finishRunCancel(id) {
+		if err != nil {
+			rep = reportFromRunError(id, sc.Name, err)
+		}
+		rep.Failures = append(rep.Failures, "run canceled by user")
+		s.store.CancelRun(id, rep)
+		return
+	}
 	if err != nil {
 		s.store.ErrorRun(id, err)
 		return
 	}
 	s.store.CompleteRun(id, rep)
+}
+
+func (s *Server) registerRunCancel(id string, cancel context.CancelFunc) {
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	s.runCancels[id] = cancel
+}
+
+func (s *Server) requestRunCancel(id string) bool {
+	s.cancelMu.Lock()
+	cancel, ok := s.runCancels[id]
+	if ok {
+		s.cancelRequests[id] = struct{}{}
+	}
+	s.cancelMu.Unlock()
+
+	if ok {
+		cancel()
+	}
+	return ok
+}
+
+func (s *Server) finishRunCancel(id string) bool {
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	_, canceled := s.cancelRequests[id]
+	delete(s.cancelRequests, id)
+	delete(s.runCancels, id)
+	return canceled
+}
+
+func isCancelableRunStatus(status store.RunStatus) bool {
+	return status == store.RunQueued || status == store.RunRunning
+}
+
+func reportFromRunError(id string, scenarioName string, err error) report.Report {
+	now := time.Now().UTC()
+	return report.Report{
+		RunID:      id,
+		Scenario:   scenarioName,
+		Status:     report.StatusCanceled,
+		StartedAt:  now,
+		FinishedAt: now,
+		Failures:   []string{err.Error()},
+	}
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, maxBytes int64, dst any) error {
