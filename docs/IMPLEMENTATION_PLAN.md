@@ -46,10 +46,12 @@ Implemented:
   - list scenario versions
   - start run
   - inspect run/report
+  - inspect run event timeline
   - cancel running run
 - Store interface with memory and PostgreSQL implementations.
 - PostgreSQL migration setup.
 - Immutable scenario versions linked to run history.
+- Persistent run event timelines for lifecycle, request, assertion, threshold, and invariant events.
 - Run guardrails:
   - target allowlist
   - maximum duration
@@ -85,6 +87,8 @@ Implemented behavior:
 - immutable scenario versions
 - run snapshots contain the exact scenario used
 - cancellation and timeout state transitions are explicit
+- run event timelines are persisted in chronological order
+- event metadata is stored as structured JSON
 - memory and PostgreSQL stores share the same API-facing `Store` interface
 - application can switch between memory and PostgreSQL with `WRECKR_STORE`
 
@@ -148,7 +152,7 @@ Artifacts:
 
 ## Phase 5: Observability
 
-Status: partially implemented. The API exposes basic Prometheus metrics at `/metrics`; OpenTelemetry and per-run metrics are planned.
+Status: partially implemented. The API exposes basic Prometheus metrics at `/metrics` and stores per-run event timelines. OpenTelemetry and richer per-run metrics are planned.
 
 Add OpenTelemetry instrumentation to Wreckr itself:
 
@@ -172,6 +176,12 @@ Optional target correlation:
 - target scrape metadata
 - trace IDs injected into requests
 
+Live monitoring follow-up:
+
+- stream persisted run events through SSE or WebSocket
+- expose event timelines in the dashboard
+- add worker retry/dead-letter event visibility
+
 ## Phase 6: Frontend Dashboard
 
 Status: partially implemented. The dashboard builds, connects to the API, launches sample scenarios, lists runs, and displays report details.
@@ -183,6 +193,7 @@ Planned dashboard flows:
 - run launcher
 - richer live run status
 - richer report view
+- event timeline view
 - invariant failure analysis
 - artifact/log viewer
 
