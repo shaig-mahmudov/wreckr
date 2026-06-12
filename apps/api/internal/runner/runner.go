@@ -39,26 +39,28 @@ func (r *Runner) Run(ctx context.Context, sc scenario.Scenario) (report.Report, 
 	startedAt := time.Now().UTC()
 	runID := newRunID()
 	collector := &recordCollector{}
+	limiter := newRequestLimiter(sc.Traffic.RatePerSecond)
+	defer limiter.stop()
 
-	setupRecords, setupChecks := r.runControlRequests(ctx, runID, sc, "setup", sc.Setup)
+	setupRecords, setupChecks := r.runControlRequests(ctx, runID, sc, "setup", sc.Setup, limiter)
 	if hasFailedCheck(setupChecks) {
 		return report.Build(runID, sc.Name, startedAt, setupRecords, setupChecks, nil), nil
 	}
 
 	switch sc.Traffic.Type {
 	case scenario.TrafficRace:
-		r.runRace(ctx, runID, sc, collector)
+		r.runRace(ctx, runID, sc, collector, limiter)
 	case scenario.TrafficRetryStorm:
-		r.runParallel(ctx, runID, sc, collector, max(1, sc.Traffic.Retry.Attempts))
+		r.runParallel(ctx, runID, sc, collector, max(1, sc.Traffic.Retry.Attempts), limiter)
 	default:
-		r.runParallel(ctx, runID, sc, collector, 1)
+		r.runParallel(ctx, runID, sc, collector, 1, limiter)
 	}
 
 	records := collector.records()
 	thresholds := evaluateThresholds(sc, records)
-	invariants := r.evaluateInvariants(ctx, runID, sc, records)
+	invariants := r.evaluateInvariants(ctx, runID, sc, records, limiter)
 
-	teardownRecords, teardownChecks := r.runControlRequests(ctx, runID, sc, "teardown", sc.Teardown)
+	teardownRecords, teardownChecks := r.runControlRequests(ctx, runID, sc, "teardown", sc.Teardown, limiter)
 	if hasFailedCheck(teardownChecks) {
 		records = append(records, teardownRecords...)
 		thresholds = append(thresholds, teardownChecks...)
@@ -66,7 +68,7 @@ func (r *Runner) Run(ctx context.Context, sc scenario.Scenario) (report.Report, 
 	return report.Build(runID, sc.Name, startedAt, records, thresholds, invariants), nil
 }
 
-func (r *Runner) runParallel(ctx context.Context, runID string, sc scenario.Scenario, collector *recordCollector, attempts int) {
+func (r *Runner) runParallel(ctx context.Context, runID string, sc scenario.Scenario, collector *recordCollector, attempts int, limiter *requestLimiter) {
 	jobs := make(chan int)
 	var wg sync.WaitGroup
 	for worker := 0; worker < sc.Traffic.Concurrency; worker++ {
@@ -80,6 +82,9 @@ func (r *Runner) runParallel(ctx context.Context, runID string, sc scenario.Scen
 				for _, req := range sc.Requests {
 					for attempt := 1; attempt <= attempts; attempt++ {
 						if ctx.Err() != nil {
+							return
+						}
+						if !limiter.wait(ctx) {
 							return
 						}
 						record := r.executeRequest(ctx, runID, sc, req, iteration, attempt)
@@ -110,7 +115,7 @@ func (r *Runner) runParallel(ctx context.Context, runID string, sc scenario.Scen
 	wg.Wait()
 }
 
-func (r *Runner) runRace(ctx context.Context, runID string, sc scenario.Scenario, collector *recordCollector) {
+func (r *Runner) runRace(ctx context.Context, runID string, sc scenario.Scenario, collector *recordCollector, limiter *requestLimiter) {
 	for iteration := 0; iteration < sc.Traffic.Iterations; iteration++ {
 		if ctx.Err() != nil {
 			return
@@ -131,6 +136,9 @@ func (r *Runner) runRace(ctx context.Context, runID string, sc scenario.Scenario
 					case <-startLine:
 					}
 					if ctx.Err() != nil {
+						return
+					}
+					if !limiter.wait(ctx) {
 						return
 					}
 					record := r.executeRequest(ctx, runID, sc, req, iteration, racer+1)
@@ -243,20 +251,20 @@ func evaluateThresholds(sc scenario.Scenario, records []report.ResponseRecord) [
 	return results
 }
 
-func (r *Runner) evaluateInvariants(ctx context.Context, runID string, sc scenario.Scenario, records []report.ResponseRecord) []report.CheckResult {
+func (r *Runner) evaluateInvariants(ctx context.Context, runID string, sc scenario.Scenario, records []report.ResponseRecord, limiter *requestLimiter) []report.CheckResult {
 	results := make([]report.CheckResult, 0, len(sc.Invariants))
 	for _, invariant := range sc.Invariants {
 		switch invariant.Type {
 		case "response_count":
 			results = append(results, evaluateResponseCount(invariant, records))
 		case "http_probe":
-			results = append(results, r.evaluateHTTPProbe(ctx, runID, sc, invariant))
+			results = append(results, r.evaluateHTTPProbe(ctx, runID, sc, invariant, limiter))
 		}
 	}
 	return results
 }
 
-func (r *Runner) runControlRequests(ctx context.Context, runID string, sc scenario.Scenario, phase string, requests []scenario.Request) ([]report.ResponseRecord, []report.CheckResult) {
+func (r *Runner) runControlRequests(ctx context.Context, runID string, sc scenario.Scenario, phase string, requests []scenario.Request, limiter *requestLimiter) ([]report.ResponseRecord, []report.CheckResult) {
 	if len(requests) == 0 {
 		return nil, nil
 	}
@@ -264,6 +272,9 @@ func (r *Runner) runControlRequests(ctx context.Context, runID string, sc scenar
 	checks := make([]report.CheckResult, 0, len(requests))
 	for _, req := range requests {
 		if ctx.Err() != nil {
+			return records, checks
+		}
+		if !limiter.wait(ctx) {
 			return records, checks
 		}
 		record := r.executeRequest(ctx, runID, sc, req, -1, 1)
@@ -319,7 +330,7 @@ func evaluateResponseCount(inv scenario.Invariant, records []report.ResponseReco
 	}
 }
 
-func (r *Runner) evaluateHTTPProbe(ctx context.Context, runID string, sc scenario.Scenario, inv scenario.Invariant) report.CheckResult {
+func (r *Runner) evaluateHTTPProbe(ctx context.Context, runID string, sc scenario.Scenario, inv scenario.Invariant, limiter *requestLimiter) report.CheckResult {
 	targetURL, err := joinURL(sc.Target.BaseURL, inv.Path)
 	if err != nil {
 		return failedInvariant(inv.Name, err.Error())
@@ -338,6 +349,9 @@ func (r *Runner) evaluateHTTPProbe(ctx context.Context, runID string, sc scenari
 	req.Header.Set("X-Wreckr-Scenario", sc.Name)
 	req.Header.Set("X-Wreckr-Probe", inv.Name)
 
+	if !limiter.wait(ctx) {
+		return failedInvariant(inv.Name, ctx.Err().Error())
+	}
 	resp, err := r.Client.Do(req)
 	if err != nil {
 		return failedInvariant(inv.Name, err.Error())
@@ -372,6 +386,39 @@ func (r *Runner) evaluateHTTPProbe(ctx context.Context, runID string, sc scenari
 type recordCollector struct {
 	mu    sync.Mutex
 	items []report.ResponseRecord
+}
+
+type requestLimiter struct {
+	ticker *time.Ticker
+}
+
+func newRequestLimiter(ratePerSecond int) *requestLimiter {
+	if ratePerSecond <= 0 {
+		return &requestLimiter{}
+	}
+	interval := time.Second / time.Duration(ratePerSecond)
+	if interval <= 0 {
+		interval = time.Nanosecond
+	}
+	return &requestLimiter{ticker: time.NewTicker(interval)}
+}
+
+func (l *requestLimiter) wait(ctx context.Context) bool {
+	if l == nil || l.ticker == nil {
+		return ctx.Err() == nil
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-l.ticker.C:
+		return true
+	}
+}
+
+func (l *requestLimiter) stop() {
+	if l != nil && l.ticker != nil {
+		l.ticker.Stop()
+	}
 }
 
 func (c *recordCollector) add(record report.ResponseRecord) {
