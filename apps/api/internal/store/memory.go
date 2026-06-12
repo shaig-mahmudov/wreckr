@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/wreckr/wreckr/apps/api/internal/report"
+	"github.com/wreckr/wreckr/apps/api/internal/runevent"
 	"github.com/wreckr/wreckr/apps/api/internal/scenario"
 )
 
@@ -55,6 +56,7 @@ type Memory struct {
 	scenarios        map[string]ScenarioRecord
 	scenarioVersions map[string][]ScenarioVersionRecord
 	runs             map[string]RunRecord
+	runEvents        map[string][]runevent.Event
 }
 
 var _ Store = (*Memory)(nil)
@@ -64,6 +66,7 @@ func NewMemory() *Memory {
 		scenarios:        map[string]ScenarioRecord{},
 		scenarioVersions: map[string][]ScenarioVersionRecord{},
 		runs:             map[string]RunRecord{},
+		runEvents:        map[string][]runevent.Event{},
 	}
 }
 
@@ -148,6 +151,17 @@ func (m *Memory) CreateRun(scenarioID string, sc scenario.Scenario) RunRecord {
 		CreatedAt:             now,
 	}
 	m.runs[id] = record
+	m.appendRunEventLocked(id, runevent.Event{
+		Level:   runevent.LevelInfo,
+		Type:    runevent.TypeRunQueued,
+		Message: "run queued",
+		Metadata: map[string]any{
+			"scenario_id":             scenarioID,
+			"scenario_version_id":     versionID,
+			"scenario_version_number": versionNumber,
+			"scenario":                sc.Name,
+		},
+	})
 	return record
 }
 
@@ -162,6 +176,11 @@ func (m *Memory) MarkRunStarted(id string) {
 	record.Status = RunRunning
 	record.StartedAt = &now
 	m.runs[id] = record
+	m.appendRunEventLocked(id, runevent.Event{
+		Level:   runevent.LevelInfo,
+		Type:    runevent.TypeRunStarted,
+		Message: "run started",
+	})
 }
 
 func (m *Memory) CompleteRun(id string, rep report.Report) {
@@ -182,6 +201,25 @@ func (m *Memory) CompleteRun(id string, rep report.Report) {
 	record.Report = &rep
 	record.FinishedAt = &now
 	m.runs[id] = record
+	eventType := runevent.TypeRunCompleted
+	level := runevent.LevelInfo
+	message := "run completed"
+	if status == RunFailed {
+		eventType = runevent.TypeRunFailed
+		level = runevent.LevelError
+		message = "run failed"
+	}
+	m.appendRunEventLocked(id, runevent.Event{
+		Level:   level,
+		Type:    eventType,
+		Message: message,
+		Metadata: map[string]any{
+			"status":          string(status),
+			"total_requests":  rep.Summary.TotalRequests,
+			"failed_requests": rep.Summary.FailedRequests,
+			"failures":        rep.Failures,
+		},
+	})
 }
 
 func (m *Memory) CancelRun(id string, rep report.Report) {
@@ -200,6 +238,14 @@ func (m *Memory) CancelRun(id string, rep report.Report) {
 	record.Error = "run canceled"
 	record.FinishedAt = &now
 	m.runs[id] = record
+	m.appendRunEventLocked(id, runevent.Event{
+		Level:   runevent.LevelWarn,
+		Type:    runevent.TypeRunCanceled,
+		Message: "run canceled",
+		Metadata: map[string]any{
+			"failures": rep.Failures,
+		},
+	})
 }
 
 func (m *Memory) ErrorRun(id string, err error) {
@@ -214,6 +260,11 @@ func (m *Memory) ErrorRun(id string, err error) {
 	record.Error = err.Error()
 	record.FinishedAt = &now
 	m.runs[id] = record
+	m.appendRunEventLocked(id, runevent.Event{
+		Level:   runevent.LevelError,
+		Type:    runevent.TypeRunFailed,
+		Message: err.Error(),
+	})
 }
 
 func (m *Memory) GetRun(id string) (RunRecord, bool) {
@@ -231,4 +282,38 @@ func (m *Memory) ListRuns() []RunRecord {
 		out = append(out, record)
 	}
 	return out
+}
+
+func (m *Memory) AppendRunEvent(runID string, event runevent.Event) runevent.Event {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.appendRunEventLocked(runID, event)
+}
+
+func (m *Memory) ListRunEvents(runID string) []runevent.Event {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	events := m.runEvents[runID]
+	out := make([]runevent.Event, len(events))
+	copy(out, events)
+	return out
+}
+
+func (m *Memory) appendRunEventLocked(runID string, event runevent.Event) runevent.Event {
+	now := time.Now().UTC()
+	if event.ID == "" {
+		event.ID = fmt.Sprintf("evt_%d", now.UnixNano())
+	}
+	if event.RunID == "" {
+		event.RunID = runID
+	}
+	if event.Level == "" {
+		event.Level = runevent.LevelInfo
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = now
+	}
+	event.Sequence = int64(len(m.runEvents[runID]) + 1)
+	m.runEvents[runID] = append(m.runEvents[runID], event)
+	return event
 }

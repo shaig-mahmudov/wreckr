@@ -13,6 +13,7 @@ import (
 	"github.com/wreckr/wreckr/apps/api/internal/config"
 	"github.com/wreckr/wreckr/apps/api/internal/guardrails"
 	"github.com/wreckr/wreckr/apps/api/internal/report"
+	"github.com/wreckr/wreckr/apps/api/internal/runevent"
 	"github.com/wreckr/wreckr/apps/api/internal/runner"
 	"github.com/wreckr/wreckr/apps/api/internal/runqueue"
 	"github.com/wreckr/wreckr/apps/api/internal/scenario"
@@ -56,6 +57,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/runs", s.listRuns)
 	mux.HandleFunc("POST /v1/runs", s.createRun)
 	mux.HandleFunc("POST /v1/runs/{id}/cancel", s.cancelRun)
+	mux.HandleFunc("GET /v1/runs/{id}/events", s.getRunEvents)
 	mux.HandleFunc("GET /v1/runs/", s.getRun)
 	return withCORS(withJSON(mux))
 }
@@ -264,6 +266,14 @@ func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, fmt.Errorf("run %q cannot be canceled from status %q", id, record.Status))
 		return
 	}
+	s.store.AppendRunEvent(id, runevent.Event{
+		Level:   runevent.LevelWarn,
+		Type:    runevent.TypeCancelRequested,
+		Message: "run cancellation requested",
+		Metadata: map[string]any{
+			"status": string(record.Status),
+		},
+	})
 	if !s.requestRunCancel(id) {
 		if s.queue != nil && record.Status == store.RunQueued {
 			s.store.CancelRun(id, canceledReport(id, record.Scenario.Name, "run canceled before worker execution"))
@@ -276,13 +286,27 @@ func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{"id": id, "status": store.RunCanceled})
 }
 
+func (s *Server) getRunEvents(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, ok := s.store.GetRun(id); !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("run %q not found", id))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events": s.store.ListRunEvents(id)})
+}
+
 func (s *Server) executeRun(parent context.Context, id string, sc scenario.Scenario) {
 	ctx, cancel := context.WithTimeout(parent, s.effectiveRunTimeout())
 	s.registerRunCancel(id, cancel)
 	defer cancel()
 
 	s.store.MarkRunStarted(id)
-	rep, err := s.runner.Run(ctx, sc)
+	rep, err := s.runner.RunWithOptions(ctx, sc, runner.RunOptions{
+		RunID: id,
+		Events: runevent.RecorderFunc(func(event runevent.Event) {
+			s.store.AppendRunEvent(id, event)
+		}),
+	})
 	if s.finishRunCancel(id) {
 		if err != nil {
 			rep = reportFromRunError(id, sc.Name, err)

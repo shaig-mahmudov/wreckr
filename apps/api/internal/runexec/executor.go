@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/wreckr/wreckr/apps/api/internal/runevent"
 	"github.com/wreckr/wreckr/apps/api/internal/runner"
 	"github.com/wreckr/wreckr/apps/api/internal/store"
 )
@@ -35,8 +36,15 @@ func (e Executor) Execute(ctx context.Context, runID string) error {
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	e.Store.MarkRunStarted(runID)
-	rep, err := e.Runner.Run(runCtx, record.Scenario)
+	if record.Status == store.RunQueued {
+		e.Store.MarkRunStarted(runID)
+	}
+	rep, err := e.Runner.RunWithOptions(runCtx, record.Scenario, runner.RunOptions{
+		RunID: runID,
+		Events: runevent.RecorderFunc(func(event runevent.Event) {
+			e.Store.AppendRunEvent(runID, event)
+		}),
+	})
 	if err != nil {
 		e.Store.ErrorRun(runID, err)
 		return err

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/wreckr/wreckr/apps/api/internal/report"
+	"github.com/wreckr/wreckr/apps/api/internal/runevent"
 	"github.com/wreckr/wreckr/apps/api/internal/scenario"
 )
 
@@ -24,6 +25,11 @@ type Runner struct {
 	Client *http.Client
 }
 
+type RunOptions struct {
+	RunID  string
+	Events runevent.Recorder
+}
+
 func New() *Runner {
 	return &Runner{
 		Client: &http.Client{Timeout: 30 * time.Second},
@@ -31,36 +37,45 @@ func New() *Runner {
 }
 
 func (r *Runner) Run(ctx context.Context, sc scenario.Scenario) (report.Report, error) {
+	return r.RunWithOptions(ctx, sc, RunOptions{})
+}
+
+func (r *Runner) RunWithOptions(ctx context.Context, sc scenario.Scenario, opts RunOptions) (report.Report, error) {
 	sc = sc.WithEnv().Normalized()
 	if err := sc.Validate(); err != nil {
 		return report.Report{}, err
 	}
 
 	startedAt := time.Now().UTC()
-	runID := newRunID()
+	runID := opts.RunID
+	if runID == "" {
+		runID = newRunID()
+	}
 	collector := &recordCollector{}
 	limiter := newRequestLimiter(sc.Traffic.RatePerSecond)
 	defer limiter.stop()
 
-	setupRecords, setupChecks := r.runControlRequests(ctx, runID, sc, "setup", sc.Setup, limiter)
+	setupRecords, setupChecks := r.runControlRequests(ctx, runID, sc, "setup", sc.Setup, limiter, opts.Events)
 	if hasFailedCheck(setupChecks) {
 		return report.Build(runID, sc.Name, startedAt, setupRecords, setupChecks, nil), nil
 	}
 
 	switch sc.Traffic.Type {
 	case scenario.TrafficRace:
-		r.runRace(ctx, runID, sc, collector, limiter)
+		r.runRace(ctx, runID, sc, collector, limiter, opts.Events)
 	case scenario.TrafficRetryStorm:
-		r.runParallel(ctx, runID, sc, collector, max(1, sc.Traffic.Retry.Attempts), limiter)
+		r.runParallel(ctx, runID, sc, collector, max(1, sc.Traffic.Retry.Attempts), limiter, opts.Events)
 	default:
-		r.runParallel(ctx, runID, sc, collector, 1, limiter)
+		r.runParallel(ctx, runID, sc, collector, 1, limiter, opts.Events)
 	}
 
 	records := collector.records()
 	thresholds := evaluateThresholds(sc, records)
-	invariants := r.evaluateInvariants(ctx, runID, sc, records, limiter)
+	emitFailedChecks(runID, opts.Events, thresholds, runevent.TypeThresholdFailed)
+	invariants := r.evaluateInvariants(ctx, runID, sc, records, limiter, opts.Events)
+	emitFailedChecks(runID, opts.Events, invariants, runevent.TypeInvariantFailed)
 
-	teardownRecords, teardownChecks := r.runControlRequests(ctx, runID, sc, "teardown", sc.Teardown, limiter)
+	teardownRecords, teardownChecks := r.runControlRequests(ctx, runID, sc, "teardown", sc.Teardown, limiter, opts.Events)
 	if hasFailedCheck(teardownChecks) {
 		records = append(records, teardownRecords...)
 		thresholds = append(thresholds, teardownChecks...)
@@ -68,7 +83,7 @@ func (r *Runner) Run(ctx context.Context, sc scenario.Scenario) (report.Report, 
 	return report.Build(runID, sc.Name, startedAt, records, thresholds, invariants), nil
 }
 
-func (r *Runner) runParallel(ctx context.Context, runID string, sc scenario.Scenario, collector *recordCollector, attempts int, limiter *requestLimiter) {
+func (r *Runner) runParallel(ctx context.Context, runID string, sc scenario.Scenario, collector *recordCollector, attempts int, limiter *requestLimiter, events runevent.Recorder) {
 	jobs := make(chan int)
 	var wg sync.WaitGroup
 	for worker := 0; worker < sc.Traffic.Concurrency; worker++ {
@@ -87,7 +102,7 @@ func (r *Runner) runParallel(ctx context.Context, runID string, sc scenario.Scen
 						if !limiter.wait(ctx) {
 							return
 						}
-						record := r.executeRequest(ctx, runID, sc, req, iteration, attempt)
+						record := r.executeRequest(ctx, runID, sc, req, iteration, attempt, events)
 						collector.add(record)
 						if sc.Traffic.Type != scenario.TrafficRetryStorm || sc.Traffic.Retry.BackoffMS <= 0 || attempt == attempts {
 							continue
@@ -115,7 +130,7 @@ func (r *Runner) runParallel(ctx context.Context, runID string, sc scenario.Scen
 	wg.Wait()
 }
 
-func (r *Runner) runRace(ctx context.Context, runID string, sc scenario.Scenario, collector *recordCollector, limiter *requestLimiter) {
+func (r *Runner) runRace(ctx context.Context, runID string, sc scenario.Scenario, collector *recordCollector, limiter *requestLimiter, events runevent.Recorder) {
 	for iteration := 0; iteration < sc.Traffic.Iterations; iteration++ {
 		if ctx.Err() != nil {
 			return
@@ -141,7 +156,7 @@ func (r *Runner) runRace(ctx context.Context, runID string, sc scenario.Scenario
 					if !limiter.wait(ctx) {
 						return
 					}
-					record := r.executeRequest(ctx, runID, sc, req, iteration, racer+1)
+					record := r.executeRequest(ctx, runID, sc, req, iteration, racer+1, events)
 					collector.add(record)
 				}(racer, req)
 			}
@@ -151,7 +166,7 @@ func (r *Runner) runRace(ctx context.Context, runID string, sc scenario.Scenario
 	}
 }
 
-func (r *Runner) executeRequest(ctx context.Context, runID string, sc scenario.Scenario, req scenario.Request, iteration int, attempt int) report.ResponseRecord {
+func (r *Runner) executeRequest(ctx context.Context, runID string, sc scenario.Scenario, req scenario.Request, iteration int, attempt int, events runevent.Recorder) report.ResponseRecord {
 	startedAt := time.Now().UTC()
 	record := report.ResponseRecord{
 		RequestName: req.Name,
@@ -159,6 +174,29 @@ func (r *Runner) executeRequest(ctx context.Context, runID string, sc scenario.S
 		Attempt:     attempt,
 		StartedAt:   startedAt,
 	}
+	requestMeta := map[string]any{
+		"request":   req.Name,
+		"method":    req.Method,
+		"path":      req.Path,
+		"iteration": iteration,
+		"attempt":   attempt,
+	}
+	emitEvent(runID, events, runevent.LevelInfo, runevent.TypeRequestStarted, "request started", requestMeta)
+	defer func() {
+		metadata := map[string]any{
+			"request":     req.Name,
+			"method":      req.Method,
+			"path":        req.Path,
+			"iteration":   iteration,
+			"attempt":     attempt,
+			"status_code": record.StatusCode,
+			"duration_ms": record.DurationMS,
+		}
+		if record.Error != "" {
+			metadata["error"] = record.Error
+		}
+		emitEvent(runID, events, runevent.LevelInfo, runevent.TypeRequestCompleted, "request completed", metadata)
+	}()
 
 	targetURL, err := joinURL(sc.Target.BaseURL, req.Path)
 	if err != nil {
@@ -211,6 +249,14 @@ func (r *Runner) executeRequest(ctx context.Context, runID string, sc scenario.S
 	if len(req.Expect.Status) > 0 {
 		if !containsStatus(req.Expect.Status, resp.StatusCode) {
 			record.Error = fmt.Sprintf("unexpected status %d, expected %v", resp.StatusCode, req.Expect.Status)
+			emitEvent(runID, events, runevent.LevelError, runevent.TypeAssertionFailed, record.Error, map[string]any{
+				"request":     req.Name,
+				"iteration":   iteration,
+				"attempt":     attempt,
+				"expected":    req.Expect.Status,
+				"actual":      resp.StatusCode,
+				"status_code": resp.StatusCode,
+			})
 		}
 		return record
 	}
@@ -251,7 +297,7 @@ func evaluateThresholds(sc scenario.Scenario, records []report.ResponseRecord) [
 	return results
 }
 
-func (r *Runner) evaluateInvariants(ctx context.Context, runID string, sc scenario.Scenario, records []report.ResponseRecord, limiter *requestLimiter) []report.CheckResult {
+func (r *Runner) evaluateInvariants(ctx context.Context, runID string, sc scenario.Scenario, records []report.ResponseRecord, limiter *requestLimiter, events runevent.Recorder) []report.CheckResult {
 	results := make([]report.CheckResult, 0, len(sc.Invariants))
 	for _, invariant := range sc.Invariants {
 		switch invariant.Type {
@@ -264,12 +310,30 @@ func (r *Runner) evaluateInvariants(ctx context.Context, runID string, sc scenar
 	return results
 }
 
-func (r *Runner) runControlRequests(ctx context.Context, runID string, sc scenario.Scenario, phase string, requests []scenario.Request, limiter *requestLimiter) ([]report.ResponseRecord, []report.CheckResult) {
+func (r *Runner) runControlRequests(ctx context.Context, runID string, sc scenario.Scenario, phase string, requests []scenario.Request, limiter *requestLimiter, events runevent.Recorder) ([]report.ResponseRecord, []report.CheckResult) {
 	if len(requests) == 0 {
 		return nil, nil
 	}
+	startType := runevent.TypeSetupStarted
+	completedType := runevent.TypeSetupCompleted
+	if phase == "teardown" {
+		startType = runevent.TypeTeardownStarted
+		completedType = runevent.TypeTeardownCompleted
+	}
+	emitEvent(runID, events, runevent.LevelInfo, startType, phase+" started", map[string]any{"requests": len(requests)})
 	records := make([]report.ResponseRecord, 0, len(requests))
 	checks := make([]report.CheckResult, 0, len(requests))
+	defer func() {
+		passed := !hasFailedCheck(checks)
+		level := runevent.LevelInfo
+		if !passed {
+			level = runevent.LevelError
+		}
+		emitEvent(runID, events, level, completedType, phase+" completed", map[string]any{
+			"requests": len(records),
+			"passed":   passed,
+		})
+	}()
 	for _, req := range requests {
 		if ctx.Err() != nil {
 			return records, checks
@@ -277,7 +341,7 @@ func (r *Runner) runControlRequests(ctx context.Context, runID string, sc scenar
 		if !limiter.wait(ctx) {
 			return records, checks
 		}
-		record := r.executeRequest(ctx, runID, sc, req, -1, 1)
+		record := r.executeRequest(ctx, runID, sc, req, -1, 1, events)
 		records = append(records, record)
 		passed := record.Error == ""
 		checks = append(checks, report.CheckResult{
@@ -505,6 +569,32 @@ func valueMessage(passed bool, actual any, expected any) string {
 
 func failedInvariant(name string, message string) report.CheckResult {
 	return report.CheckResult{Name: name, Passed: false, Message: message}
+}
+
+func emitFailedChecks(runID string, events runevent.Recorder, checks []report.CheckResult, eventType runevent.Type) {
+	for _, check := range checks {
+		if check.Passed {
+			continue
+		}
+		emitEvent(runID, events, runevent.LevelError, eventType, check.Message, map[string]any{
+			"check":    check.Name,
+			"expected": check.Expected,
+			"actual":   check.Actual,
+		})
+	}
+}
+
+func emitEvent(runID string, events runevent.Recorder, level string, eventType runevent.Type, message string, metadata map[string]any) {
+	if events == nil {
+		return
+	}
+	events.Record(runevent.Event{
+		RunID:    runID,
+		Level:    level,
+		Type:     eventType,
+		Message:  message,
+		Metadata: metadata,
+	})
 }
 
 func hasFailedCheck(checks []report.CheckResult) bool {
