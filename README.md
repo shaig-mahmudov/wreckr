@@ -51,6 +51,20 @@ Health check:
 curl http://localhost:8080/healthz
 ```
 
+## Run Guardrails
+
+The API validates every scenario before it is stored or executed. Configure safety limits with environment variables:
+
+```bash
+WRECKR_MAX_CONCURRENCY=1000
+WRECKR_MAX_REQUEST_RATE_PER_SECOND=5000
+WRECKR_MAX_RUN_DURATION_SECONDS=300
+WRECKR_MAX_REQUEST_BODY_BYTES=1048576
+WRECKR_TARGET_ALLOWLIST=api.example.com,*.internal.example.com
+```
+
+The configured request-rate limit caps outgoing traffic even when a scenario omits `traffic.rate_per_second`; set `traffic.rate_per_second` when a scenario should run below that cap. Absolute request URLs are rejected unless they match the target or the configured allowlist.
+
 ## Example Scenario
 
 ```json

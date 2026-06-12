@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -205,6 +207,174 @@ func TestCancelCompletedRunReturnsConflict(t *testing.T) {
 	assertErrorResponse(t, resp)
 }
 
+func TestRunGuardrailsRejectUnsafeScenarios(t *testing.T) {
+	target := newTargetServer(t)
+
+	tests := []struct {
+		name      string
+		cfg       config.Config
+		mutate    func(*scenario.Scenario)
+		wantError string
+	}{
+		{
+			name: "max concurrency",
+			cfg: testConfig(config.Guardrails{
+				MaxConcurrency:      1,
+				MaxRequestBodyBytes: 1 << 20,
+			}),
+			mutate: func(sc *scenario.Scenario) {
+				sc.Traffic.Concurrency = 2
+			},
+			wantError: "traffic.concurrency 2 exceeds max_concurrency 1",
+		},
+		{
+			name: "max request rate",
+			cfg: testConfig(config.Guardrails{
+				MaxRequestRate:      10,
+				MaxRequestBodyBytes: 1 << 20,
+			}),
+			mutate: func(sc *scenario.Scenario) {
+				sc.Traffic.RatePerSecond = 11
+			},
+			wantError: "traffic.rate_per_second 11 exceeds max_request_rate_per_second 10",
+		},
+		{
+			name: "max request body size",
+			cfg: testConfig(config.Guardrails{
+				MaxRequestBodyBytes: 10,
+			}),
+			mutate: func(sc *scenario.Scenario) {
+				sc.Requests[0].Body = strings.Repeat("x", 11)
+			},
+			wantError: "requests[0].body size 11 exceeds max_request_body_bytes 10",
+		},
+		{
+			name: "target allowlist",
+			cfg: testConfig(config.Guardrails{
+				MaxRequestBodyBytes: 1 << 20,
+				TargetAllowlist:     []string{"allowed.example"},
+			}),
+			wantError: "target.base_url host",
+		},
+		{
+			name: "absolute request target",
+			cfg: testConfig(config.Guardrails{
+				MaxRequestBodyBytes: 1 << 20,
+			}),
+			mutate: func(sc *scenario.Scenario) {
+				sc.Requests[0].Path = "http://evil.example/work"
+			},
+			wantError: "requests[0].path absolute URL host",
+		},
+		{
+			name: "target credentials",
+			cfg: testConfig(config.Guardrails{
+				MaxRequestBodyBytes: 1 << 20,
+			}),
+			mutate: func(sc *scenario.Scenario) {
+				sc.Target.BaseURL = "http://user:pass@example.com"
+			},
+			wantError: "target.base_url must not include credentials",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := newAPIServerWithConfig(t, tc.cfg)
+			sc := testScenario(target.URL)
+			if tc.mutate != nil {
+				tc.mutate(&sc)
+			}
+			resp := postJSONRaw(t, api.URL+"/v1/runs", map[string]any{
+				"scenario": sc,
+				"sync":     true,
+			}, http.StatusBadRequest)
+			assertErrorContains(t, resp, tc.wantError)
+		})
+	}
+}
+
+func TestRunGuardrailsAllowlistedTargetCanRun(t *testing.T) {
+	target := newTargetServer(t)
+	cfg := testConfig(config.Guardrails{
+		MaxConcurrency:      10,
+		MaxRequestRate:      100,
+		MaxRequestBodyBytes: 1 << 20,
+		TargetAllowlist:     []string{mustURLHost(t, target.URL)},
+	})
+	api := newAPIServerWithConfig(t, cfg)
+
+	run := postJSON[store.RunRecord](t, api.URL+"/v1/runs", map[string]any{
+		"scenario": testScenario(target.URL),
+		"sync":     true,
+	}, http.StatusCreated)
+	if run.Status != store.RunPassed {
+		t.Fatalf("run status = %s, want %s", run.Status, store.RunPassed)
+	}
+}
+
+func TestRunGuardrailsApplyMaxRequestRateWhenScenarioOmitsRate(t *testing.T) {
+	target := newTargetServer(t)
+	api := newAPIServerWithConfig(t, testConfig(config.Guardrails{
+		MaxRequestRate:      10,
+		MaxRequestBodyBytes: 1 << 20,
+	}))
+	sc := testScenario(target.URL)
+	sc.Setup = nil
+	sc.Teardown = nil
+	sc.Traffic.Concurrency = 2
+	sc.Traffic.Iterations = 2
+
+	startedAt := time.Now()
+	run := postJSON[store.RunRecord](t, api.URL+"/v1/runs", map[string]any{
+		"scenario": sc,
+		"sync":     true,
+	}, http.StatusCreated)
+	elapsed := time.Since(startedAt)
+	if run.Status != store.RunPassed {
+		t.Fatalf("run status = %s, want %s", run.Status, store.RunPassed)
+	}
+	if run.Scenario.Traffic.RatePerSecond != 10 {
+		t.Fatalf("run rate_per_second = %d, want guardrail cap 10", run.Scenario.Traffic.RatePerSecond)
+	}
+	if elapsed < 150*time.Millisecond {
+		t.Fatalf("run completed too quickly for guardrail rate cap: elapsed = %s", elapsed)
+	}
+}
+
+func TestRunGuardrailsMaxRunDurationStopsRun(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer target.Close()
+
+	api := newAPIServerWithConfig(t, testConfig(config.Guardrails{
+		MaxRunDuration:      20 * time.Millisecond,
+		MaxRequestBodyBytes: 1 << 20,
+	}))
+	sc := testScenario(target.URL)
+	sc.Setup = nil
+	sc.Teardown = nil
+
+	startedAt := time.Now()
+	run := postJSON[store.RunRecord](t, api.URL+"/v1/runs", map[string]any{
+		"scenario": sc,
+		"sync":     true,
+	}, http.StatusCreated)
+	if elapsed := time.Since(startedAt); elapsed > time.Second {
+		t.Fatalf("run duration guardrail did not stop the run quickly: elapsed = %s", elapsed)
+	}
+	if run.Status != store.RunFailed {
+		t.Fatalf("run status = %s, want %s", run.Status, store.RunFailed)
+	}
+	if run.Report == nil || len(run.Report.Responses) != 1 {
+		t.Fatalf("expected partial failed report, got %#v", run.Report)
+	}
+	if !strings.Contains(run.Report.Responses[0].Error, "context deadline exceeded") {
+		t.Fatalf("response error = %q, want context deadline exceeded", run.Report.Responses[0].Error)
+	}
+}
+
 func TestRunCreationWithInlineScenario(t *testing.T) {
 	target := newTargetServer(t)
 	api := newAPIServer(t)
@@ -250,16 +420,35 @@ func TestReportEndpointReturnsConflictWhenReportIsNotReady(t *testing.T) {
 
 func newAPIServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	return newAPIServerWithConfig(t, testConfig(config.Guardrails{
+		MaxConcurrency:      1000,
+		MaxRequestRate:      5000,
+		MaxRunDuration:      5 * time.Second,
+		MaxRequestBodyBytes: 1 << 20,
+	}))
+}
 
+func newAPIServerWithConfig(t *testing.T, cfg config.Config) *httptest.Server {
+	t.Helper()
 	srv := httpapi.New(config.Config{
-		Addr:         ":0",
-		RunTimeout:   5 * time.Second,
-		MaxBodyBytes: 1 << 20,
+		Addr:         cfg.Addr,
+		RunTimeout:   cfg.RunTimeout,
+		MaxBodyBytes: cfg.MaxBodyBytes,
+		Guardrails:   cfg.Guardrails,
 	}, store.NewMemory(), runner.New())
 
 	api := httptest.NewServer(srv.Handler())
 	t.Cleanup(api.Close)
 	return api
+}
+
+func testConfig(guardrails config.Guardrails) config.Config {
+	return config.Config{
+		Addr:         ":0",
+		RunTimeout:   5 * time.Second,
+		MaxBodyBytes: 1 << 20,
+		Guardrails:   guardrails,
+	}
 }
 
 func newTargetServer(t *testing.T) *httptest.Server {
@@ -421,4 +610,24 @@ func assertErrorResponse(t *testing.T, raw []byte) {
 	if payload.Error == "" {
 		t.Fatalf("expected JSON error response, got %s", string(raw))
 	}
+}
+
+func assertErrorContains(t *testing.T, raw []byte, want string) {
+	t.Helper()
+	var payload struct {
+		Error string `json:"error"`
+	}
+	decodeJSON(t, raw, &payload)
+	if !strings.Contains(payload.Error, want) {
+		t.Fatalf("error = %q, want to contain %q", payload.Error, want)
+	}
+}
+
+func mustURLHost(t *testing.T, raw string) string {
+	t.Helper()
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed.Hostname()
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/wreckr/wreckr/apps/api/internal/config"
+	"github.com/wreckr/wreckr/apps/api/internal/guardrails"
 	"github.com/wreckr/wreckr/apps/api/internal/report"
 	"github.com/wreckr/wreckr/apps/api/internal/runner"
 	"github.com/wreckr/wreckr/apps/api/internal/scenario"
@@ -98,6 +99,10 @@ func (s *Server) createScenario(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if err := guardrails.Validate(sc, s.cfg.Guardrails); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	record := s.store.CreateScenario(sc)
 	writeJSON(w, http.StatusCreated, record)
 }
@@ -140,6 +145,10 @@ func (s *Server) updateScenario(w http.ResponseWriter, r *http.Request) {
 	}
 	sc = sc.WithEnv().Normalized()
 	if err := sc.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := guardrails.Validate(sc, s.cfg.Guardrails); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -186,6 +195,11 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if err := guardrails.Validate(sc, s.cfg.Guardrails); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	sc = s.applyRunGuardrails(sc)
 
 	runRecord := s.store.CreateRun(scenarioID, sc)
 	if req.Sync {
@@ -241,7 +255,7 @@ func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) executeRun(parent context.Context, id string, sc scenario.Scenario) {
-	ctx, cancel := context.WithTimeout(parent, s.cfg.RunTimeout)
+	ctx, cancel := context.WithTimeout(parent, s.effectiveRunTimeout())
 	s.registerRunCancel(id, cancel)
 	defer cancel()
 
@@ -260,6 +274,20 @@ func (s *Server) executeRun(parent context.Context, id string, sc scenario.Scena
 		return
 	}
 	s.store.CompleteRun(id, rep)
+}
+
+func (s *Server) effectiveRunTimeout() time.Duration {
+	if s.cfg.Guardrails.MaxRunDuration > 0 && s.cfg.Guardrails.MaxRunDuration < s.cfg.RunTimeout {
+		return s.cfg.Guardrails.MaxRunDuration
+	}
+	return s.cfg.RunTimeout
+}
+
+func (s *Server) applyRunGuardrails(sc scenario.Scenario) scenario.Scenario {
+	if s.cfg.Guardrails.MaxRequestRate > 0 && sc.Traffic.RatePerSecond == 0 {
+		sc.Traffic.RatePerSecond = s.cfg.Guardrails.MaxRequestRate
+	}
+	return sc
 }
 
 func (s *Server) registerRunCancel(id string, cancel context.CancelFunc) {

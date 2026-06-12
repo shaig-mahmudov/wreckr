@@ -40,10 +40,11 @@ type Target struct {
 }
 
 type Traffic struct {
-	Type        TrafficType `json:"type"`
-	Concurrency int         `json:"concurrency"`
-	Iterations  int         `json:"iterations"`
-	Retry       RetryPolicy `json:"retry,omitempty"`
+	Type          TrafficType `json:"type"`
+	Concurrency   int         `json:"concurrency"`
+	Iterations    int         `json:"iterations"`
+	RatePerSecond int         `json:"rate_per_second,omitempty"`
+	Retry         RetryPolicy `json:"retry,omitempty"`
 }
 
 type RetryPolicy struct {
@@ -188,6 +189,9 @@ func (s Scenario) Validate() error {
 	}
 	if s.Traffic.Iterations < 1 {
 		problems = append(problems, "traffic.iterations must be >= 1")
+	}
+	if s.Traffic.RatePerSecond < 0 {
+		problems = append(problems, "traffic.rate_per_second must be >= 0")
 	}
 	if s.Traffic.Retry.Attempts < 0 {
 		problems = append(problems, "traffic.retry.attempts must be >= 0")

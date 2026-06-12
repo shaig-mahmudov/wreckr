@@ -161,6 +161,32 @@ func TestRunnerCoversLoadBurstAndSpikeTrafficModes(t *testing.T) {
 	}
 }
 
+func TestRunnerHonorsTrafficRatePerSecond(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	sc := baseScenario(server.URL, scenario.TrafficLoad, 3, 3)
+	sc.Traffic.RatePerSecond = 10
+
+	startedAt := time.Now()
+	got, err := New().Run(context.Background(), sc)
+	elapsed := time.Since(startedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != report.StatusPassed {
+		t.Fatalf("status = %s, want passed; failures: %v", got.Status, got.Failures)
+	}
+	if got.Summary.TotalRequests != 3 {
+		t.Fatalf("summary total requests = %d, want 3", got.Summary.TotalRequests)
+	}
+	if elapsed < 250*time.Millisecond {
+		t.Fatalf("rate limiter completed too quickly: elapsed = %s, want at least 250ms", elapsed)
+	}
+}
+
 func TestRunnerValidatesExpectedHTTPStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
