@@ -15,6 +15,7 @@ type Store interface {
 	CreateRun(scenarioID string, sc scenario.Scenario) RunRecord
 	MarkRunStarted(id string)
 	CompleteRun(id string, rep report.Report)
+	CancelRun(id string, rep report.Report)
 	ErrorRun(id string, err error)
 	GetRun(id string) (RunRecord, bool)
 	ListRuns() []RunRecord

@@ -129,6 +129,33 @@ func TestPostgresStorePersistsScenariosRunsAndReports(t *testing.T) {
 	if listed := st.ListRuns(); len(listed) != 1 {
 		t.Fatalf("run count = %d, want 1", len(listed))
 	}
+
+	cancelRun := st.CreateRun(created.ID, sc)
+	st.MarkRunStarted(cancelRun.ID)
+	cancelReport := report.Build(cancelRun.ID, sc.Name, time.Now().Add(-time.Second), []report.ResponseRecord{{
+		RequestName: "request",
+		Error:       "context canceled",
+		DurationMS:  7,
+		StartedAt:   time.Now().Add(-time.Second),
+	}}, nil, nil)
+	st.CancelRun(cancelRun.ID, cancelReport)
+
+	canceled, ok := st.GetRun(cancelRun.ID)
+	if !ok {
+		t.Fatal("canceled run was not found")
+	}
+	if canceled.Status != RunCanceled {
+		t.Fatalf("canceled run status = %s, want %s", canceled.Status, RunCanceled)
+	}
+	if canceled.Report == nil {
+		t.Fatal("canceled run missing report")
+	}
+	if canceled.Report.Status != report.StatusCanceled {
+		t.Fatalf("canceled report status = %s, want %s", canceled.Report.Status, report.StatusCanceled)
+	}
+	if canceled.FinishedAt == nil {
+		t.Fatal("canceled run missing FinishedAt")
+	}
 }
 
 func resetPostgresSchema(t *testing.T, ctx context.Context, db *sql.DB) {

@@ -288,13 +288,22 @@ func (p *Postgres) MarkRunStarted(id string) {
 }
 
 func (p *Postgres) CompleteRun(id string, rep report.Report) {
-	ctx, cancel := storeContext()
-	defer cancel()
-
 	status := RunPassed
 	if rep.Status == report.StatusFailed {
 		status = RunFailed
 	}
+	p.finishRunWithReport(id, status, rep, "")
+}
+
+func (p *Postgres) CancelRun(id string, rep report.Report) {
+	rep.Status = report.StatusCanceled
+	p.finishRunWithReport(id, RunCanceled, rep, "run canceled")
+}
+
+func (p *Postgres) finishRunWithReport(id string, status RunStatus, rep report.Report, errorMessage string) {
+	ctx, cancel := storeContext()
+	defer cancel()
+
 	run, ok := p.getRun(ctx, id)
 	if ok {
 		rep.ScenarioVersionID = run.ScenarioVersionID
@@ -317,9 +326,9 @@ func (p *Postgres) CompleteRun(id string, rep report.Report) {
 
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE runs
-		SET status = $2, finished_at = now(), error = NULL
+		SET status = $2, finished_at = now(), error = NULLIF($3, '')
 		WHERE id = $1
-	`, id, status); err != nil {
+	`, id, status, errorMessage); err != nil {
 		return
 	}
 

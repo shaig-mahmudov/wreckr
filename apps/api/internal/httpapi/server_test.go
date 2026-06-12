@@ -120,6 +120,91 @@ func TestScenarioUpdateCreatesVersionWithoutMutatingOldRunReport(t *testing.T) {
 	}
 }
 
+func TestRunCancellationEndpointCancelsRunningRunAndSavesPartialReport(t *testing.T) {
+	started := make(chan struct{}, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/slow" {
+			http.NotFound(w, r)
+			return
+		}
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+	}))
+	defer target.Close()
+
+	api := newAPIServer(t)
+	sc := testScenario(target.URL)
+	sc.Setup = nil
+	sc.Teardown = nil
+	sc.Traffic.Iterations = 50
+	sc.Requests = []scenario.Request{{
+		Name:   "slow",
+		Method: http.MethodGet,
+		Path:   "/slow",
+		Expect: scenario.RequestExpectation{Status: []int{http.StatusOK}},
+	}}
+
+	run := postJSON[store.RunRecord](t, api.URL+"/v1/runs", map[string]any{
+		"scenario": sc,
+		"sync":     false,
+	}, http.StatusAccepted)
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("run did not start a target request")
+	}
+
+	canceled := postJSON[struct {
+		ID     string          `json:"id"`
+		Status store.RunStatus `json:"status"`
+	}](t, api.URL+"/v1/runs/"+run.ID+"/cancel", map[string]any{}, http.StatusAccepted)
+	if canceled.ID != run.ID {
+		t.Fatalf("cancel response ID = %q, want %q", canceled.ID, run.ID)
+	}
+	if canceled.Status != store.RunCanceled {
+		t.Fatalf("cancel response status = %s, want %s", canceled.Status, store.RunCanceled)
+	}
+
+	finalRun := waitForRunStatus(t, api.URL, run.ID, store.RunCanceled)
+	if finalRun.Report == nil {
+		t.Fatal("canceled run did not include a partial report")
+	}
+	if finalRun.Report.Status != report.StatusCanceled {
+		t.Fatalf("partial report status = %s, want %s", finalRun.Report.Status, report.StatusCanceled)
+	}
+	if finalRun.Report.Summary.TotalRequests == 0 {
+		t.Fatal("partial report did not include the in-flight request")
+	}
+	if finalRun.Report.Summary.TotalRequests >= sc.Traffic.Iterations {
+		t.Fatalf("runner continued sending requests after cancellation: total requests = %d", finalRun.Report.Summary.TotalRequests)
+	}
+
+	rep := getJSON[report.Report](t, api.URL+"/v1/runs/"+run.ID+"/report", http.StatusOK)
+	if rep.Status != report.StatusCanceled {
+		t.Fatalf("report endpoint status = %s, want %s", rep.Status, report.StatusCanceled)
+	}
+}
+
+func TestCancelCompletedRunReturnsConflict(t *testing.T) {
+	target := newTargetServer(t)
+	api := newAPIServer(t)
+
+	run := postJSON[store.RunRecord](t, api.URL+"/v1/runs", map[string]any{
+		"scenario": testScenario(target.URL),
+		"sync":     true,
+	}, http.StatusCreated)
+	if run.Status != store.RunPassed {
+		t.Fatalf("run status = %s, want %s", run.Status, store.RunPassed)
+	}
+
+	resp := postJSONRaw(t, api.URL+"/v1/runs/"+run.ID+"/cancel", map[string]any{}, http.StatusConflict)
+	assertErrorResponse(t, resp)
+}
+
 func TestRunCreationWithInlineScenario(t *testing.T) {
 	target := newTargetServer(t)
 	api := newAPIServer(t)
@@ -291,6 +376,21 @@ func getRaw(t *testing.T, url string, wantStatus int) []byte {
 	}
 	defer resp.Body.Close()
 	return readResponse(t, resp, wantStatus)
+}
+
+func waitForRunStatus(t *testing.T, baseURL string, id string, status store.RunStatus) store.RunRecord {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		run := getJSON[store.RunRecord](t, baseURL+"/v1/runs/"+id, http.StatusOK)
+		if run.Status == status {
+			return run
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	run := getJSON[store.RunRecord](t, baseURL+"/v1/runs/"+id, http.StatusOK)
+	t.Fatalf("run status = %s, want %s", run.Status, status)
+	return store.RunRecord{}
 }
 
 func readResponse(t *testing.T, resp *http.Response, wantStatus int) []byte {

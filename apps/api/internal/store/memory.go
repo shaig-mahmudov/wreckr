@@ -12,11 +12,12 @@ import (
 type RunStatus string
 
 const (
-	RunQueued  RunStatus = "queued"
-	RunRunning RunStatus = "running"
-	RunPassed  RunStatus = "passed"
-	RunFailed  RunStatus = "failed"
-	RunErrored RunStatus = "errored"
+	RunQueued   RunStatus = "queued"
+	RunRunning  RunStatus = "running"
+	RunPassed   RunStatus = "passed"
+	RunFailed   RunStatus = "failed"
+	RunErrored  RunStatus = "errored"
+	RunCanceled RunStatus = "canceled"
 )
 
 type ScenarioRecord struct {
@@ -179,6 +180,24 @@ func (m *Memory) CompleteRun(id string, rep report.Report) {
 	rep.ScenarioVersionNumber = record.ScenarioVersionNumber
 	record.Status = status
 	record.Report = &rep
+	record.FinishedAt = &now
+	m.runs[id] = record
+}
+
+func (m *Memory) CancelRun(id string, rep report.Report) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	record, ok := m.runs[id]
+	if !ok {
+		return
+	}
+	now := time.Now().UTC()
+	rep.Status = report.StatusCanceled
+	rep.ScenarioVersionID = record.ScenarioVersionID
+	rep.ScenarioVersionNumber = record.ScenarioVersionNumber
+	record.Status = RunCanceled
+	record.Report = &rep
+	record.Error = "run canceled"
 	record.FinishedAt = &now
 	m.runs[id] = record
 }
