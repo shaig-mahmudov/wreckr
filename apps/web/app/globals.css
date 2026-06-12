@@ -348,6 +348,7 @@ textarea:focus {
 
 .run-list,
 .failure-list,
+.event-timeline,
 .json-report {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -465,6 +466,78 @@ textarea:focus {
 }
 
 .failure-list p {
+  padding: 14px;
+  color: var(--muted);
+}
+
+.event-timeline ol {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  list-style: none;
+}
+
+.event-timeline li {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: var(--surface);
+}
+
+.event-timeline li > span {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.event-timeline li.warn > span {
+  background: #fff4db;
+  color: var(--amber);
+}
+
+.event-timeline li.error > span {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.event-timeline li div {
+  min-width: 0;
+}
+
+.event-timeline strong,
+.event-timeline small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-timeline strong {
+  color: var(--ink);
+  font-size: 0.83rem;
+}
+
+.event-timeline small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.event-timeline p {
   padding: 14px;
   color: var(--muted);
 }
