@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -58,6 +59,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/runs", s.createRun)
 	mux.HandleFunc("POST /v1/runs/{id}/cancel", s.cancelRun)
 	mux.HandleFunc("GET /v1/runs/{id}/events", s.getRunEvents)
+	mux.HandleFunc("GET /v1/runs/{id}/events/stream", s.streamRunEvents)
 	mux.HandleFunc("GET /v1/runs/", s.getRun)
 	return withCORS(withJSON(mux))
 }
@@ -295,6 +297,52 @@ func (s *Server) getRunEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"events": s.store.ListRunEvents(id)})
 }
 
+func (s *Server) streamRunEvents(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, ok := s.store.GetRun(id); !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("run %q not found", id))
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, errors.New("streaming is not supported"))
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	lastSequence := lastEventSequence(r)
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		events := s.store.ListRunEvents(id)
+		for _, event := range events {
+			if event.Sequence <= lastSequence {
+				continue
+			}
+			if err := writeSSEEvent(w, event); err != nil {
+				return
+			}
+			lastSequence = event.Sequence
+		}
+		flusher.Flush()
+
+		record, ok := s.store.GetRun(id)
+		if !ok || isTerminalRunStatus(record.Status) || hasTerminalEvent(events) {
+			return
+		}
+
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
 func (s *Server) executeRun(parent context.Context, id string, sc scenario.Scenario) {
 	ctx, cancel := context.WithTimeout(parent, s.effectiveRunTimeout())
 	s.registerRunCancel(id, cancel)
@@ -367,6 +415,54 @@ func (s *Server) finishRunCancel(id string) bool {
 
 func isCancelableRunStatus(status store.RunStatus) bool {
 	return status == store.RunQueued || status == store.RunRunning
+}
+
+func isTerminalRunStatus(status store.RunStatus) bool {
+	switch status {
+	case store.RunPassed, store.RunFailed, store.RunErrored, store.RunCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func hasTerminalEvent(events []runevent.Event) bool {
+	for _, event := range events {
+		switch event.Type {
+		case runevent.TypeRunCompleted, runevent.TypeRunFailed, runevent.TypeRunCanceled:
+			return true
+		}
+	}
+	return false
+}
+
+func lastEventSequence(r *http.Request) int64 {
+	value := r.Header.Get("Last-Event-ID")
+	if value == "" {
+		value = r.URL.Query().Get("after")
+	}
+	sequence, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || sequence < 0 {
+		return 0
+	}
+	return sequence
+}
+
+func writeSSEEvent(w http.ResponseWriter, event runevent.Event) error {
+	raw, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "id: %d\n", event.Sequence); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "event: %s\n", event.Type); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", raw); err != nil {
+		return err
+	}
+	return nil
 }
 
 func reportFromRunError(id string, scenarioName string, err error) report.Report {

@@ -72,7 +72,7 @@ Scenario versioning is modeled explicitly with immutable `scenario_versions` row
 
 Runs store both `scenario_id` and `scenario_version_id`, plus a JSON scenario snapshot, so old reports continue to show the exact scenario version that executed even after the scenario is edited.
 
-Run events are stored in `run_events` with a per-run sequence number, event level, event type, message, structured JSON metadata, and timestamp. The API returns them in chronological sequence through `GET /v1/runs/{id}/events`.
+Run events are stored in `run_events` with a per-run sequence number, event level, event type, message, structured JSON metadata, and timestamp. The API returns them in chronological sequence through `GET /v1/runs/{id}/events` and streams them live through `GET /v1/runs/{id}/events/stream`.
 
 Run lifecycle state is stored in the `run_status` enum and used by both `runs.status` and `reports.status`.
 

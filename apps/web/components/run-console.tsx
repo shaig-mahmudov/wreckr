@@ -46,10 +46,46 @@ type RunsResponse = {
   error?: string;
 };
 
+type RunEvent = {
+  id?: string;
+  run_id: string;
+  sequence: number;
+  level: "info" | "warn" | "error";
+  type: string;
+  message: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+};
+
+type EventsResponse = {
+  events?: RunEvent[];
+  error?: string;
+};
+
 const samples = [
   { id: "checkout", label: "Checkout Race", value: checkoutRaceScenario },
   { id: "login", label: "Login Burst", value: loginBurstScenario }
 ];
+
+const streamEventTypes = [
+  "run_queued",
+  "run_started",
+  "setup_started",
+  "setup_completed",
+  "teardown_started",
+  "teardown_completed",
+  "request_started",
+  "request_completed",
+  "assertion_failed",
+  "invariant_failed",
+  "threshold_failed",
+  "cancel_requested",
+  "run_completed",
+  "run_failed",
+  "run_canceled"
+];
+
+const terminalEventTypes = new Set(["run_completed", "run_failed", "run_canceled"]);
 
 export function RunConsole() {
   const [apiURL, setAPIURL] = useState(process.env.NEXT_PUBLIC_WRECKR_API_URL ?? "http://localhost:8080");
@@ -57,6 +93,7 @@ export function RunConsole() {
   const [scenarioText, setScenarioText] = useState(JSON.stringify(samples[0].value, null, 2));
   const [latestRun, setLatestRun] = useState<RunResponse | null>(null);
   const [runs, setRuns] = useState<RunRecord[]>([]);
+  const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
   const [selectedRunID, setSelectedRunID] = useState<string | null>(null);
   const [apiState, setAPIState] = useState<"checking" | "connected" | "offline">("checking");
   const [busy, setBusy] = useState(false);
@@ -72,18 +109,74 @@ export function RunConsole() {
 
   const selectedRun = runs.find((run) => run.id === selectedRunID) ?? latestRun;
   const activeReport = selectedRun?.report;
-  const statusClass = activeReport?.status === "passed" ? "good" : activeReport?.status === "failed" ? "bad" : "idle";
+  const activeStatus = activeReport?.status ?? selectedRun?.status ?? "ready";
+  const statusClass = activeStatus === "passed" ? "good" : activeStatus === "failed" || activeStatus === "errored" || activeStatus === "canceled" ? "bad" : "idle";
   const canRun = Boolean(parsedScenario) && !busy;
 
   useEffect(() => {
     void refreshRuns();
   }, []);
 
+  useEffect(() => {
+    if (!selectedRunID) {
+      setRunEvents([]);
+      return;
+    }
+
+    const runID = selectedRunID;
+    let closed = false;
+    let source: EventSource | null = null;
+    const baseURL = apiURL.replace(/\/$/, "");
+
+    async function connect() {
+      try {
+        const response = await fetch(`${baseURL}/v1/runs/${runID}/events`, { cache: "no-store" });
+        const payload = (await response.json()) as EventsResponse;
+        if (!response.ok) {
+          throw new Error(payload.error ?? `Event list failed with ${response.status}`);
+        }
+        const persistedEvents = payload.events ?? [];
+        setRunEvents(persistedEvents);
+        if (closed || persistedEvents.some((event) => terminalEventTypes.has(event.type))) {
+          return;
+        }
+
+        source = new EventSource(`${baseURL}/v1/runs/${runID}/events/stream`);
+        for (const eventType of streamEventTypes) {
+          source.addEventListener(eventType, (message) => {
+            const event = JSON.parse((message as MessageEvent).data) as RunEvent;
+            appendRunEvent(event);
+            if (terminalEventTypes.has(event.type)) {
+              source?.close();
+              void refreshRuns(runID);
+            }
+          });
+        }
+        source.onerror = () => {
+          if (closed) {
+            source?.close();
+          }
+        };
+      } catch (err) {
+        if (!closed) {
+          setError(err instanceof Error ? err.message : "Could not load run events.");
+        }
+      }
+    }
+
+    void connect();
+    return () => {
+      closed = true;
+      source?.close();
+    };
+  }, [apiURL, selectedRunID]);
+
   function selectSample(id: string) {
     const sample = samples.find((item) => item.id === id) ?? samples[0];
     setSelectedSample(sample.id);
     setScenarioText(JSON.stringify(sample.value, null, 2));
     setLatestRun(null);
+    setRunEvents([]);
     setSelectedRunID(null);
     setError(null);
   }
@@ -136,6 +229,7 @@ export function RunConsole() {
         throw new Error(payload.error ?? `Request failed with ${response.status}`);
       }
       setLatestRun(payload);
+      setRunEvents([]);
       setSelectedRunID(payload.id);
       await refreshRuns(payload.id);
     } catch (err) {
@@ -143,6 +237,15 @@ export function RunConsole() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function appendRunEvent(event: RunEvent) {
+    setRunEvents((current) => {
+      const next = current.filter((item) => item.sequence !== event.sequence);
+      next.push(event);
+      next.sort((a, b) => a.sequence - b.sequence);
+      return next;
+    });
   }
 
   return (
@@ -154,7 +257,7 @@ export function RunConsole() {
         </div>
         <div className={`run-state ${statusClass}`}>
           {activeReport?.status === "passed" ? <CheckCircle2 size={18} /> : activeReport?.status === "failed" ? <XCircle size={18} /> : <ServerCrash size={18} />}
-          <span>{activeReport?.status ?? "ready"}</span>
+          <span>{activeStatus}</span>
         </div>
       </header>
 
@@ -262,6 +365,28 @@ export function RunConsole() {
               </ul>
             ) : (
               <p>{activeReport ? "None" : "No report selected"}</p>
+            )}
+          </section>
+
+          <section className="event-timeline" aria-label="Run event timeline">
+            <div className="section-title">
+              <Activity size={17} />
+              <h2>Timeline</h2>
+            </div>
+            {runEvents.length > 0 ? (
+              <ol>
+                {runEvents.map((event) => (
+                  <li key={`${event.run_id}-${event.sequence}`} className={event.level}>
+                    <span>{event.sequence}</span>
+                    <div>
+                      <strong>{event.type}</strong>
+                      <small>{event.message || new Date(event.created_at).toLocaleTimeString()}</small>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p>{selectedRun ? "Waiting for events" : "No run selected"}</p>
             )}
           </section>
 
