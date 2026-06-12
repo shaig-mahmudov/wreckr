@@ -47,11 +47,13 @@ Implemented:
   - start run
   - inspect run/report
   - inspect run event timeline
+  - stream live run events with SSE
   - cancel running run
 - Store interface with memory and PostgreSQL implementations.
 - PostgreSQL migration setup.
 - Immutable scenario versions linked to run history.
 - Persistent run event timelines for lifecycle, request, assertion, threshold, and invariant events.
+- Live run progress streaming with Server-Sent Events.
 - Run guardrails:
   - target allowlist
   - maximum duration
@@ -152,7 +154,7 @@ Artifacts:
 
 ## Phase 5: Observability
 
-Status: partially implemented. The API exposes basic Prometheus metrics at `/metrics` and stores per-run event timelines. OpenTelemetry and richer per-run metrics are planned.
+Status: partially implemented. The API exposes basic Prometheus metrics at `/metrics`, stores per-run event timelines, and streams run progress with SSE. OpenTelemetry and richer per-run metrics are planned.
 
 Add OpenTelemetry instrumentation to Wreckr itself:
 
@@ -178,8 +180,8 @@ Optional target correlation:
 
 Live monitoring follow-up:
 
-- stream persisted run events through SSE or WebSocket
-- expose event timelines in the dashboard
+- richer event filtering and grouping in the dashboard
+- optional WebSocket support if bidirectional control becomes necessary
 - add worker retry/dead-letter event visibility
 
 ## Phase 6: Frontend Dashboard
@@ -193,7 +195,7 @@ Planned dashboard flows:
 - run launcher
 - richer live run status
 - richer report view
-- event timeline view
+- live event timeline view
 - invariant failure analysis
 - artifact/log viewer
 

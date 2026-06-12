@@ -16,7 +16,7 @@ This repository now contains a working MVP control plane and runner:
 - optional request-rate pacing with `traffic.rate_per_second`
 - response and probe-based business invariants
 - latency/error/status reports
-- HTTP API for scenarios, scenario versions, runs, reports, event timelines, and run cancellation
+- HTTP API for scenarios, scenario versions, runs, reports, event timelines, live event streams, and run cancellation
 - pluggable storage with memory and PostgreSQL implementations
 - immutable scenario versions linked to historical runs and reports
 - persistent run event timelines for lifecycle, request, assertion, threshold, and invariant events
@@ -25,7 +25,7 @@ This repository now contains a working MVP control plane and runner:
 - PostgreSQL migrations for the persistent control-plane schema
 - CLI runner
 - intentionally vulnerable demo API
-- Next.js dashboard with API connectivity, run list, and report view
+- Next.js dashboard with API connectivity, run list, live event timeline, and report view
 - GitHub Actions CI for backend, frontend, and Docker Compose validation
 - Docker Compose scaffold for API, demo target, Postgres, Redis, Prometheus, and web
 
