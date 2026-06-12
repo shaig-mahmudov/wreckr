@@ -8,20 +8,26 @@ Unlike unit tests, Wreckr tests a system from the outside under production-like 
 
 ## Current MVP
 
-This repository now contains the first vertical slice:
+This repository now contains a working MVP control plane and runner:
 
 - Go scenario engine
 - black-box HTTP runner
-- concurrent, race, burst, spike, and retry-storm traffic modes
+- load, burst, spike, race, and retry-storm traffic modes
+- optional request-rate pacing with `traffic.rate_per_second`
 - response and probe-based business invariants
 - latency/error/status reports
-- HTTP API with in-memory run storage
+- HTTP API for scenarios, scenario versions, runs, reports, and run cancellation
+- pluggable storage with memory and PostgreSQL implementations
+- immutable scenario versions linked to historical runs and reports
+- run guardrails for concurrency, request rate, duration, request body size, and target allowlists
+- PostgreSQL migrations for the persistent control-plane schema
 - CLI runner
 - intentionally vulnerable demo API
-- Next.js dashboard scaffold
+- Next.js dashboard with API connectivity, run list, and report view
+- GitHub Actions CI for backend, frontend, and Docker Compose validation
 - Docker Compose scaffold for API, demo target, Postgres, Redis, Prometheus, and web
 
-The MVP intentionally keeps the core engine dependency-free. Postgres, Redis + Asynq, object storage, k6, and Kubernetes jobs are planned as the next orchestration layer around this core.
+The core engine still runs in-process today. Redis + Asynq, object storage, k6, and Kubernetes jobs remain planned as the next orchestration layer around this core.
 
 ## Quick Start
 
@@ -49,6 +55,14 @@ Health check:
 
 ```bash
 curl http://localhost:8080/healthz
+```
+
+Use PostgreSQL storage instead of memory:
+
+```bash
+docker compose up -d postgres
+docker compose --profile tools run --rm migrate
+WRECKR_STORE=postgres go run ./apps/api/cmd/api
 ```
 
 ## Run Guardrails
@@ -139,3 +153,5 @@ Target backend
 ```
 
 See [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the staged implementation plan.
+
+See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the current implementation state, known gaps, and recommended next milestones.

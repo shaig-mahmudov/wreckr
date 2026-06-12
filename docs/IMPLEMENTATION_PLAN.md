@@ -18,7 +18,7 @@ The product remains language-agnostic by default. It tests targets from the outs
 
 ## Phase 1: Current Vertical Slice
 
-Implemented in this first pass:
+Implemented:
 
 - JSON scenario schema.
 - Scenario validation.
@@ -41,16 +41,35 @@ Implemented in this first pass:
 - HTTP API:
   - health check
   - create scenario
+  - update scenario
   - list scenarios
+  - list scenario versions
   - start run
   - inspect run/report
+  - cancel running run
+- Store interface with memory and PostgreSQL implementations.
+- PostgreSQL migration setup.
+- Immutable scenario versions linked to run history.
+- Run guardrails:
+  - target allowlist
+  - maximum duration
+  - maximum concurrency
+  - maximum request rate
+  - maximum request body size
+  - unsafe target URL rejection
+- Next.js dashboard:
+  - API health connection
+  - sample scenario launcher
+  - run list
+  - report view
+- GitHub Actions CI for Go tests, Go vet, frontend build, and Docker Compose config validation.
 - Demo target API with broken idempotency.
 
 ## Phase 2: Persistent Control Plane
 
-Replace in-memory storage with PostgreSQL.
+Status: mostly implemented for the MVP.
 
-Core tables:
+Implemented core tables:
 
 - `projects`
 - `targets`
@@ -58,22 +77,26 @@ Core tables:
 - `scenario_versions`
 - `runs`
 - `run_events`
-- `run_metrics`
-- `run_threshold_results`
-- `run_invariant_results`
-- `artifacts`
 - `reports`
 
-Important behavior:
+Implemented behavior:
 
 - immutable scenario versions
 - run snapshots contain the exact scenario used
-- report artifacts are stored separately from relational metadata
 - cancellation and timeout state transitions are explicit
+- memory and PostgreSQL stores share the same API-facing `Store` interface
+- application can switch between memory and PostgreSQL with `WRECKR_STORE`
+
+Still planned:
+
+- normalized run metrics tables
+- normalized threshold and invariant result tables
+- artifact metadata and object storage integration
+- report artifact retention policies
 
 ## Phase 3: Async Orchestration
 
-Introduce Redis + Asynq.
+Status: planned. Redis is present in Docker Compose, but the runner still executes in-process from the API.
 
 Jobs:
 
@@ -95,6 +118,8 @@ The current `runner` package should remain the domain engine. Asynq should orche
 
 ## Phase 4: k6 Compiler
 
+Status: planned.
+
 Compile Wreckr scenarios into generated k6 scripts for high-scale HTTP workloads.
 
 Initial compiler targets:
@@ -114,6 +139,8 @@ Artifacts:
 - normalized Wreckr report
 
 ## Phase 5: Observability
+
+Status: partially implemented. The API exposes basic Prometheus metrics at `/metrics`; OpenTelemetry and per-run metrics are planned.
 
 Add OpenTelemetry instrumentation to Wreckr itself:
 
@@ -139,13 +166,15 @@ Optional target correlation:
 
 ## Phase 6: Frontend Dashboard
 
-Dashboard flows:
+Status: partially implemented. The dashboard builds, connects to the API, launches sample scenarios, lists runs, and displays report details.
+
+Planned dashboard flows:
 
 - project/target setup
 - scenario editor
 - run launcher
-- live run status
-- report view
+- richer live run status
+- richer report view
 - invariant failure analysis
 - artifact/log viewer
 
@@ -153,28 +182,38 @@ The dashboard should feel like an operational tool: dense, calm, and built for r
 
 ## Phase 7: Production Hardening
 
-Guardrails:
+Status: partially implemented.
+
+Implemented guardrails:
 
 - target allowlist
 - max duration
 - max concurrency
 - max RPS
 - max request body size
+- cancellation
+
+Still planned:
+
 - encrypted secrets
 - per-project quotas
 - audit log
-- cancellation
 - artifact retention
 - warning labels for production targets
 
-Security:
+Implemented security posture:
 
 - no arbitrary shell execution from scenario files
+
+Still planned security hardening:
+
 - secrets are redacted in logs/reports
 - generated scripts are stored and inspectable
 - runner containers have restricted network and filesystem access
 
 ## Phase 8: Protocols And Failure Modes
+
+Status: planned.
 
 Add adapters:
 
