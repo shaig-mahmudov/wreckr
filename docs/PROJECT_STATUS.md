@@ -22,6 +22,8 @@ Wreckr is now a working MVP for language-agnostic backend scenario testing. It c
 - Run cancellation through `POST /v1/runs/{id}/cancel`.
 - Partial canceled reports saved after cancellation.
 - Scenario create, update, list, version list, run create, run status, and report endpoints.
+- Redis + Asynq orchestration for API-created runs.
+- Separate worker process for queued run execution.
 - Immutable scenario versioning.
 - Memory store and PostgreSQL store behind a shared `Store` interface.
 - PostgreSQL migrations for projects, targets, scenarios, scenario versions, runs, run events, and reports.
@@ -35,7 +37,7 @@ Wreckr is now a working MVP for language-agnostic backend scenario testing. It c
 - Prometheus-style API metrics at `/metrics`.
 - Next.js dashboard that connects to the API, launches sample scenarios, lists runs, and displays report details.
 - GitHub Actions CI for backend tests, backend vet, frontend build, and Docker Compose config validation.
-- Docker Compose stack for API, dashboard, demo API, PostgreSQL, Redis, migrations, and Prometheus.
+- Docker Compose stack for API, worker, dashboard, demo API, PostgreSQL, Redis, migrations, and Prometheus.
 
 ## Storage
 
@@ -80,8 +82,9 @@ The repository currently has automated coverage for:
 
 ## Main Gaps
 
-- Runner execution is still in-process inside the API.
-- Redis is present in Docker Compose, but Asynq job orchestration is not implemented yet.
+- CLI execution is still in-process by design.
+- Worker-owned running jobs do not yet support distributed cancellation.
+- Async orchestration does not yet expose dead-letter/retry dashboards or run event streams.
 - k6 script generation is not implemented yet.
 - Object storage and report artifact retention are not implemented yet.
 - OpenTelemetry tracing is not implemented yet.

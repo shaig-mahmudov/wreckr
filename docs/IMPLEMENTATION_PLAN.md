@@ -63,6 +63,7 @@ Implemented:
   - run list
   - report view
 - GitHub Actions CI for Go tests, Go vet, frontend build, and Docker Compose config validation.
+- Redis + Asynq worker orchestration for API-created runs.
 - Demo target API with broken idempotency.
 
 ## Phase 2: Persistent Control Plane
@@ -96,23 +97,30 @@ Still planned:
 
 ## Phase 3: Async Orchestration
 
-Status: planned. Redis is present in Docker Compose, but the runner still executes in-process from the API.
+Status: initial implementation complete.
 
-Jobs:
+Implemented:
 
-- `run.start`
-- `run.cancel`
-- `artifact.collect`
-- `report.finalize`
+- Redis-backed Asynq queue.
+- `runs.execute` task payload containing the run ID.
+- API-created runs are persisted as `queued` and enqueued instead of executing in the API process.
+- Separate `cmd/worker` entrypoint consumes queued run jobs.
+- Worker reloads the run snapshot from the store, executes the existing runner, and persists status/report transitions.
+- Docker Compose starts API, worker, Redis, Postgres, and migrations together.
 
-Worker responsibilities:
+Current worker responsibilities:
 
-- reserve run
-- compile scenario
+- load queued run
 - launch runner
-- stream run events
-- collect summaries/logs
 - finalize report
+
+Still planned:
+
+- dedicated cancellation task for running worker-owned jobs
+- run event streaming
+- artifact collection
+- richer retry/dead-letter visibility
+- worker metrics
 
 The current `runner` package should remain the domain engine. Asynq should orchestrate it, not replace it.
 
