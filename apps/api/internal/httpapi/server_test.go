@@ -15,6 +15,7 @@ import (
 	"github.com/wreckr/wreckr/apps/api/internal/config"
 	"github.com/wreckr/wreckr/apps/api/internal/httpapi"
 	"github.com/wreckr/wreckr/apps/api/internal/report"
+	"github.com/wreckr/wreckr/apps/api/internal/runevent"
 	"github.com/wreckr/wreckr/apps/api/internal/runner"
 	"github.com/wreckr/wreckr/apps/api/internal/scenario"
 	"github.com/wreckr/wreckr/apps/api/internal/store"
@@ -77,6 +78,89 @@ func TestRunCreateStatusAndReportEndpoints(t *testing.T) {
 	}
 	if rep.Summary.TotalRequests != 1 {
 		t.Fatalf("report total requests = %d, want 1", rep.Summary.TotalRequests)
+	}
+}
+
+func TestRunEventsEndpointReturnsChronologicalTimeline(t *testing.T) {
+	target := newTargetServer(t)
+	api := newAPIServer(t)
+
+	run := postJSON[store.RunRecord](t, api.URL+"/v1/runs", map[string]any{
+		"scenario": testScenario(target.URL),
+		"sync":     true,
+	}, http.StatusCreated)
+
+	events := getJSON[struct {
+		Events []runevent.Event `json:"events"`
+	}](t, api.URL+"/v1/runs/"+run.ID+"/events", http.StatusOK)
+	if len(events.Events) == 0 {
+		t.Fatal("expected run events")
+	}
+	for i, event := range events.Events {
+		if event.RunID != run.ID {
+			t.Fatalf("events[%d].run_id = %q, want %q", i, event.RunID, run.ID)
+		}
+		if event.Sequence != int64(i+1) {
+			t.Fatalf("events[%d].sequence = %d, want %d", i, event.Sequence, i+1)
+		}
+	}
+	assertEventTypes(t, events.Events,
+		runevent.TypeRunQueued,
+		runevent.TypeRunStarted,
+		runevent.TypeSetupStarted,
+		runevent.TypeSetupCompleted,
+		runevent.TypeRequestStarted,
+		runevent.TypeRequestCompleted,
+		runevent.TypeTeardownStarted,
+		runevent.TypeTeardownCompleted,
+		runevent.TypeRunCompleted,
+	)
+}
+
+func TestRunEventsRecordAssertionThresholdAndInvariantFailures(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/work" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer target.Close()
+
+	api := newAPIServer(t)
+	sc := testScenario(target.URL)
+	sc.Setup = nil
+	sc.Teardown = nil
+	sc.Requests[0].Expect = scenario.RequestExpectation{Status: []int{http.StatusOK}}
+	equalsZero := 0
+	status500 := http.StatusInternalServerError
+	sc.Invariants = []scenario.Invariant{{
+		Name:    "no-500s",
+		Type:    "response_count",
+		Request: "work",
+		Status:  &status500,
+		Equals:  &equalsZero,
+	}}
+
+	run := postJSON[store.RunRecord](t, api.URL+"/v1/runs", map[string]any{
+		"scenario": sc,
+		"sync":     true,
+	}, http.StatusCreated)
+	if run.Status != store.RunFailed {
+		t.Fatalf("run status = %s, want %s", run.Status, store.RunFailed)
+	}
+
+	events := getJSON[struct {
+		Events []runevent.Event `json:"events"`
+	}](t, api.URL+"/v1/runs/"+run.ID+"/events", http.StatusOK)
+	assertEventTypes(t, events.Events,
+		runevent.TypeAssertionFailed,
+		runevent.TypeThresholdFailed,
+		runevent.TypeInvariantFailed,
+		runevent.TypeRunFailed,
+	)
+	if !eventTypeHasMetadata(events.Events, runevent.TypeAssertionFailed, "expected") {
+		t.Fatal("assertion_failed event missing structured expected metadata")
 	}
 }
 
@@ -667,6 +751,37 @@ func assertErrorContains(t *testing.T, raw []byte, want string) {
 	if !strings.Contains(payload.Error, want) {
 		t.Fatalf("error = %q, want to contain %q", payload.Error, want)
 	}
+}
+
+func assertEventTypes(t *testing.T, events []runevent.Event, want ...runevent.Type) {
+	t.Helper()
+	seen := map[runevent.Type]bool{}
+	for _, event := range events {
+		seen[event.Type] = true
+	}
+	for _, eventType := range want {
+		if !seen[eventType] {
+			t.Fatalf("event type %q was not recorded; got %v", eventType, eventTypes(events))
+		}
+	}
+}
+
+func eventTypes(events []runevent.Event) []runevent.Type {
+	out := make([]runevent.Type, 0, len(events))
+	for _, event := range events {
+		out = append(out, event.Type)
+	}
+	return out
+}
+
+func eventTypeHasMetadata(events []runevent.Event, eventType runevent.Type, key string) bool {
+	for _, event := range events {
+		if event.Type == eventType {
+			_, ok := event.Metadata[key]
+			return ok
+		}
+	}
+	return false
 }
 
 func mustURLHost(t *testing.T, raw string) string {

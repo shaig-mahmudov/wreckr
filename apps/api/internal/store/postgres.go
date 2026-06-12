@@ -15,6 +15,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/wreckr/wreckr/apps/api/internal/report"
+	"github.com/wreckr/wreckr/apps/api/internal/runevent"
 	"github.com/wreckr/wreckr/apps/api/internal/scenario"
 )
 
@@ -273,6 +274,17 @@ func (p *Postgres) CreateRun(scenarioID string, sc scenario.Scenario) RunRecord 
 	}
 	record.Scenario = sc
 	record.ScenarioVersionNumber = versionNumber
+	p.AppendRunEvent(record.ID, runevent.Event{
+		Level:   runevent.LevelInfo,
+		Type:    runevent.TypeRunQueued,
+		Message: "run queued",
+		Metadata: map[string]any{
+			"scenario_id":             record.ScenarioID,
+			"scenario_version_id":     record.ScenarioVersionID,
+			"scenario_version_number": record.ScenarioVersionNumber,
+			"scenario":                sc.Name,
+		},
+	})
 	return record
 }
 
@@ -285,6 +297,11 @@ func (p *Postgres) MarkRunStarted(id string) {
 		SET status = 'running', started_at = COALESCE(started_at, now())
 		WHERE id = $1
 	`, id)
+	p.appendRunEvent(ctx, id, runevent.Event{
+		Level:   runevent.LevelInfo,
+		Type:    runevent.TypeRunStarted,
+		Message: "run started",
+	})
 }
 
 func (p *Postgres) CompleteRun(id string, rep report.Report) {
@@ -293,11 +310,38 @@ func (p *Postgres) CompleteRun(id string, rep report.Report) {
 		status = RunFailed
 	}
 	p.finishRunWithReport(id, status, rep, "")
+	eventType := runevent.TypeRunCompleted
+	level := runevent.LevelInfo
+	message := "run completed"
+	if status == RunFailed {
+		eventType = runevent.TypeRunFailed
+		level = runevent.LevelError
+		message = "run failed"
+	}
+	p.AppendRunEvent(id, runevent.Event{
+		Level:   level,
+		Type:    eventType,
+		Message: message,
+		Metadata: map[string]any{
+			"status":          string(status),
+			"total_requests":  rep.Summary.TotalRequests,
+			"failed_requests": rep.Summary.FailedRequests,
+			"failures":        rep.Failures,
+		},
+	})
 }
 
 func (p *Postgres) CancelRun(id string, rep report.Report) {
 	rep.Status = report.StatusCanceled
 	p.finishRunWithReport(id, RunCanceled, rep, "run canceled")
+	p.AppendRunEvent(id, runevent.Event{
+		Level:   runevent.LevelWarn,
+		Type:    runevent.TypeRunCanceled,
+		Message: "run canceled",
+		Metadata: map[string]any{
+			"failures": rep.Failures,
+		},
+	})
 }
 
 func (p *Postgres) finishRunWithReport(id string, status RunStatus, rep report.Report, errorMessage string) {
@@ -363,6 +407,11 @@ func (p *Postgres) ErrorRun(id string, err error) {
 		SET status = 'errored', error = $2, finished_at = now()
 		WHERE id = $1
 	`, id, message)
+	p.appendRunEvent(ctx, id, runevent.Event{
+		Level:   runevent.LevelError,
+		Type:    runevent.TypeRunFailed,
+		Message: message,
+	})
 }
 
 func (p *Postgres) GetRun(id string) (RunRecord, bool) {
@@ -408,6 +457,42 @@ func (p *Postgres) ListRuns() []RunRecord {
 		records = append(records, record)
 	}
 	return records
+}
+
+func (p *Postgres) AppendRunEvent(runID string, event runevent.Event) runevent.Event {
+	ctx, cancel := storeContext()
+	defer cancel()
+	return p.appendRunEvent(ctx, runID, event)
+}
+
+func (p *Postgres) ListRunEvents(runID string) []runevent.Event {
+	ctx, cancel := storeContext()
+	defer cancel()
+
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT id::text, run_id::text, sequence, level, type, message, data, created_at
+		FROM run_events
+		WHERE run_id = $1
+		ORDER BY sequence ASC, created_at ASC
+	`, runID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var events []runevent.Event
+	for rows.Next() {
+		var event runevent.Event
+		var raw []byte
+		if err := rows.Scan(&event.ID, &event.RunID, &event.Sequence, &event.Level, &event.Type, &event.Message, &raw, &event.CreatedAt); err != nil {
+			return nil
+		}
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &event.Metadata)
+		}
+		events = append(events, event)
+	}
+	return events
 }
 
 func (p *Postgres) ensureDefaultProject(ctx context.Context) error {
@@ -497,6 +582,57 @@ func (p *Postgres) getReport(ctx context.Context, runID string) (report.Report, 
 		return report.Report{}, false
 	}
 	return rep, true
+}
+
+func (p *Postgres) appendRunEvent(ctx context.Context, runID string, event runevent.Event) runevent.Event {
+	if event.RunID == "" {
+		event.RunID = runID
+	}
+	if event.Level == "" {
+		event.Level = runevent.LevelInfo
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = time.Now().UTC()
+	}
+	metadata := event.Metadata
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	raw, err := json.Marshal(metadata)
+	if err != nil {
+		return event
+	}
+
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return event
+	}
+	defer rollbackUnlessCommitted(tx)
+
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, runID); err != nil {
+		return event
+	}
+	var sequence int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(sequence), 0) + 1
+		FROM run_events
+		WHERE run_id = $1
+	`, runID).Scan(&sequence); err != nil {
+		return event
+	}
+	err = tx.QueryRowContext(ctx, `
+		INSERT INTO run_events (run_id, sequence, level, type, message, data, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id::text, sequence, created_at
+	`, runID, sequence, event.Level, event.Type, event.Message, raw, event.CreatedAt).Scan(&event.ID, &event.Sequence, &event.CreatedAt)
+	if err != nil {
+		return event
+	}
+	if err := tx.Commit(); err != nil {
+		return event
+	}
+	event.Metadata = metadata
+	return event
 }
 
 func marshalScenario(sc scenario.Scenario) ([]byte, string, error) {

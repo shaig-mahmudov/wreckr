@@ -16,9 +16,10 @@ This repository now contains a working MVP control plane and runner:
 - optional request-rate pacing with `traffic.rate_per_second`
 - response and probe-based business invariants
 - latency/error/status reports
-- HTTP API for scenarios, scenario versions, runs, reports, and run cancellation
+- HTTP API for scenarios, scenario versions, runs, reports, event timelines, and run cancellation
 - pluggable storage with memory and PostgreSQL implementations
 - immutable scenario versions linked to historical runs and reports
+- persistent run event timelines for lifecycle, request, assertion, threshold, and invariant events
 - run guardrails for concurrency, request rate, duration, request body size, and target allowlists
 - Redis + Asynq background worker orchestration for API-created runs
 - PostgreSQL migrations for the persistent control-plane schema

@@ -21,7 +21,8 @@ Wreckr is now a working MVP for language-agnostic backend scenario testing. It c
 - Context timeout handling for safe run shutdown.
 - Run cancellation through `POST /v1/runs/{id}/cancel`.
 - Partial canceled reports saved after cancellation.
-- Scenario create, update, list, version list, run create, run status, and report endpoints.
+- Scenario create, update, list, version list, run create, run status, report, and event timeline endpoints.
+- Persistent run event timelines for lifecycle, hook, request, assertion, threshold, invariant, cancellation, and terminal-state events.
 - Redis + Asynq orchestration for API-created runs.
 - Separate worker process for queued run execution.
 - Immutable scenario versioning.
@@ -61,6 +62,7 @@ PostgreSQL integration tests are opt-in through `WRECKR_TEST_DATABASE_URL`.
 - `POST /v1/runs`
 - `GET /v1/runs/{id}`
 - `GET /v1/runs/{id}/report`
+- `GET /v1/runs/{id}/events`
 - `POST /v1/runs/{id}/cancel`
 
 ## Verification
@@ -77,6 +79,7 @@ The repository currently has automated coverage for:
 - Threshold failures.
 - Context timeout behavior.
 - Run cancellation.
+- Run event persistence and retrieval.
 - Guardrail enforcement.
 - Request-rate pacing.
 
@@ -84,7 +87,8 @@ The repository currently has automated coverage for:
 
 - CLI execution is still in-process by design.
 - Worker-owned running jobs do not yet support distributed cancellation.
-- Async orchestration does not yet expose dead-letter/retry dashboards or run event streams.
+- Async orchestration does not yet expose dead-letter/retry dashboards.
+- Run events are persisted and retrievable, but live WebSocket/SSE streaming is not implemented yet.
 - k6 script generation is not implemented yet.
 - Object storage and report artifact retention are not implemented yet.
 - OpenTelemetry tracing is not implemented yet.
@@ -95,7 +99,7 @@ The repository currently has automated coverage for:
 ## Recommended Next Milestones
 
 1. Add Redis + Asynq worker orchestration so API requests enqueue runs instead of executing them in-process.
-2. Add run event streaming and persist per-run event timelines.
+2. Add live run event streaming over SSE or WebSocket using the persisted event timeline as the source of truth.
 3. Add a scenario editor and target management to the dashboard.
 4. Add object storage for raw reports, logs, generated scripts, and artifacts.
 5. Add OpenTelemetry traces and richer Prometheus metrics.

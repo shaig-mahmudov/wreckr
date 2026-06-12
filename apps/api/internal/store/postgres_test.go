@@ -11,6 +11,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/wreckr/wreckr/apps/api/internal/report"
+	"github.com/wreckr/wreckr/apps/api/internal/runevent"
 	"github.com/wreckr/wreckr/apps/api/internal/scenario"
 )
 
@@ -67,6 +68,10 @@ func TestPostgresStorePersistsScenariosRunsAndReports(t *testing.T) {
 	if run.ScenarioVersionNumber != 1 {
 		t.Fatalf("run scenario version = %d, want 1", run.ScenarioVersionNumber)
 	}
+	events := st.ListRunEvents(run.ID)
+	if len(events) != 1 || events[0].Type != runevent.TypeRunQueued {
+		t.Fatalf("initial run events = %#v, want run_queued", events)
+	}
 
 	updatedScenario := postgresTestScenario()
 	updatedScenario.Name = "postgres-store-test-v2"
@@ -91,6 +96,10 @@ func TestPostgresStorePersistsScenariosRunsAndReports(t *testing.T) {
 	}
 	if started.StartedAt == nil {
 		t.Fatal("started run missing StartedAt")
+	}
+	events = st.ListRunEvents(run.ID)
+	if len(events) < 2 || events[1].Type != runevent.TypeRunStarted {
+		t.Fatalf("started run events = %#v, want second event run_started", events)
 	}
 
 	rep := report.Build(run.ID, sc.Name, time.Now().Add(-time.Second), []report.ResponseRecord{{
@@ -128,6 +137,15 @@ func TestPostgresStorePersistsScenariosRunsAndReports(t *testing.T) {
 	}
 	if listed := st.ListRuns(); len(listed) != 1 {
 		t.Fatalf("run count = %d, want 1", len(listed))
+	}
+	events = st.ListRunEvents(run.ID)
+	if len(events) < 3 || events[len(events)-1].Type != runevent.TypeRunCompleted {
+		t.Fatalf("completed run events = %#v, want final event run_completed", events)
+	}
+	for i, event := range events {
+		if event.Sequence != int64(i+1) {
+			t.Fatalf("event %d sequence = %d, want %d", i, event.Sequence, i+1)
+		}
 	}
 
 	cancelRun := st.CreateRun(created.ID, sc)

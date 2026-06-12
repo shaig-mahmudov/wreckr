@@ -2,6 +2,7 @@ package store
 
 import (
 	"github.com/wreckr/wreckr/apps/api/internal/report"
+	"github.com/wreckr/wreckr/apps/api/internal/runevent"
 	"github.com/wreckr/wreckr/apps/api/internal/scenario"
 )
 
@@ -19,4 +20,6 @@ type Store interface {
 	ErrorRun(id string, err error)
 	GetRun(id string) (RunRecord, bool)
 	ListRuns() []RunRecord
+	AppendRunEvent(runID string, event runevent.Event) runevent.Event
+	ListRunEvents(runID string) []runevent.Event
 }
