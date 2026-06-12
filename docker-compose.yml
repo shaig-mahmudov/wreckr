@@ -11,13 +11,36 @@ services:
       WRECKR_MAX_RUN_DURATION_SECONDS: "300"
       WRECKR_MAX_REQUEST_BODY_BYTES: "1048576"
       WRECKR_TARGET_ALLOWLIST: ${WRECKR_TARGET_ALLOWLIST:-}
-      WRECKR_STORE: ${WRECKR_STORE:-memory}
+      WRECKR_STORE: ${WRECKR_STORE:-postgres}
       DATABASE_URL: ${DATABASE_URL:-postgres://wreckr:wreckr@postgres:5432/wreckr?sslmode=disable}
+      REDIS_ADDR: redis:6379
     ports:
       - "8080:8080"
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.worker
+    environment:
+      WRECKR_RUN_TIMEOUT_SECONDS: "300"
+      WRECKR_STORE: ${WRECKR_STORE:-postgres}
+      DATABASE_URL: ${DATABASE_URL:-postgres://wreckr:wreckr@postgres:5432/wreckr?sslmode=disable}
+      REDIS_ADDR: redis:6379
+      WRECKR_WORKER_CONCURRENCY: "4"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
 
   web:
     build:
@@ -57,8 +80,6 @@ services:
 
   migrate:
     image: migrate/migrate:v4.17.1
-    profiles:
-      - tools
     depends_on:
       postgres:
         condition: service_healthy
