@@ -1,6 +1,7 @@
 package httpapi_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -161,6 +163,49 @@ func TestRunEventsRecordAssertionThresholdAndInvariantFailures(t *testing.T) {
 	)
 	if !eventTypeHasMetadata(events.Events, runevent.TypeAssertionFailed, "expected") {
 		t.Fatal("assertion_failed event missing structured expected metadata")
+	}
+}
+
+func TestRunEventsStreamReturnsPersistedEventsAndClosesAtTerminalState(t *testing.T) {
+	target := newTargetServer(t)
+	api := newAPIServer(t)
+
+	run := postJSON[store.RunRecord](t, api.URL+"/v1/runs", map[string]any{
+		"scenario": testScenario(target.URL),
+		"sync":     true,
+	}, http.StatusCreated)
+
+	events := streamRunEvents(t, api.URL+"/v1/runs/"+run.ID+"/events/stream", "")
+	if len(events) == 0 {
+		t.Fatal("expected streamed events")
+	}
+	assertEventTypes(t, events, runevent.TypeRunQueued, runevent.TypeRunStarted, runevent.TypeRunCompleted)
+	if events[len(events)-1].Type != runevent.TypeRunCompleted {
+		t.Fatalf("last stream event = %s, want %s", events[len(events)-1].Type, runevent.TypeRunCompleted)
+	}
+}
+
+func TestRunEventsStreamResumesAfterLastEventID(t *testing.T) {
+	target := newTargetServer(t)
+	api := newAPIServer(t)
+
+	run := postJSON[store.RunRecord](t, api.URL+"/v1/runs", map[string]any{
+		"scenario": testScenario(target.URL),
+		"sync":     true,
+	}, http.StatusCreated)
+	persisted := getJSON[struct {
+		Events []runevent.Event `json:"events"`
+	}](t, api.URL+"/v1/runs/"+run.ID+"/events", http.StatusOK)
+	if len(persisted.Events) < 2 {
+		t.Fatalf("expected at least two persisted events, got %d", len(persisted.Events))
+	}
+
+	events := streamRunEvents(t, api.URL+"/v1/runs/"+run.ID+"/events/stream", strconv.FormatInt(persisted.Events[0].Sequence, 10))
+	if len(events) == 0 {
+		t.Fatal("expected resumed stream events")
+	}
+	if events[0].Sequence <= persisted.Events[0].Sequence {
+		t.Fatalf("resumed event sequence = %d, want > %d", events[0].Sequence, persisted.Events[0].Sequence)
 	}
 }
 
@@ -695,6 +740,49 @@ func getRaw(t *testing.T, url string, wantStatus int) []byte {
 	}
 	defer resp.Body.Close()
 	return readResponse(t, resp, wantStatus)
+}
+
+func streamRunEvents(t *testing.T, url string, lastEventID string) []runevent.Event {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lastEventID != "" {
+		req.Header.Set("Last-Event-ID", lastEventID)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("stream status = %d, want 200; body: %s", resp.StatusCode, string(body))
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/event-stream") {
+		t.Fatalf("content-type = %q, want text/event-stream", got)
+	}
+
+	var events []runevent.Event
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var event runevent.Event
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, event)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return events
 }
 
 func waitForRunStatus(t *testing.T, baseURL string, id string, status store.RunStatus) store.RunRecord {
