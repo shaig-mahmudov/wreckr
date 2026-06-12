@@ -16,6 +16,9 @@ type Config struct {
 
 	StoreBackend string
 	DatabaseURL  string
+
+	RedisAddr         string
+	WorkerConcurrency int
 }
 
 type Guardrails struct {
@@ -40,8 +43,10 @@ func FromEnv() Config {
 			MaxRequestBodyBytes: int64(envInt("WRECKR_MAX_REQUEST_BODY_BYTES", int(maxBodyBytes))),
 			TargetAllowlist:     envCSV("WRECKR_TARGET_ALLOWLIST"),
 		},
-		StoreBackend: envString("WRECKR_STORE", "memory"),
-		DatabaseURL:  envString("DATABASE_URL", "postgres://wreckr:wreckr@localhost:5432/wreckr?sslmode=disable"),
+		StoreBackend:      envString("WRECKR_STORE", "memory"),
+		DatabaseURL:       envString("DATABASE_URL", "postgres://wreckr:wreckr@localhost:5432/wreckr?sslmode=disable"),
+		RedisAddr:         envString("REDIS_ADDR", "localhost:6379"),
+		WorkerConcurrency: envInt("WRECKR_WORKER_CONCURRENCY", 4),
 	}
 }
 

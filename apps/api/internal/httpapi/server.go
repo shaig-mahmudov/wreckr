@@ -14,6 +14,7 @@ import (
 	"github.com/wreckr/wreckr/apps/api/internal/guardrails"
 	"github.com/wreckr/wreckr/apps/api/internal/report"
 	"github.com/wreckr/wreckr/apps/api/internal/runner"
+	"github.com/wreckr/wreckr/apps/api/internal/runqueue"
 	"github.com/wreckr/wreckr/apps/api/internal/scenario"
 	"github.com/wreckr/wreckr/apps/api/internal/store"
 )
@@ -22,6 +23,7 @@ type Server struct {
 	cfg    config.Config
 	store  store.Store
 	runner *runner.Runner
+	queue  runqueue.Enqueuer
 
 	cancelMu       sync.Mutex
 	runCancels     map[string]context.CancelFunc
@@ -29,10 +31,15 @@ type Server struct {
 }
 
 func New(cfg config.Config, st store.Store, rn *runner.Runner) *Server {
+	return NewWithQueue(cfg, st, rn, nil)
+}
+
+func NewWithQueue(cfg config.Config, st store.Store, rn *runner.Runner, queue runqueue.Enqueuer) *Server {
 	return &Server{
 		cfg:            cfg,
 		store:          st,
 		runner:         rn,
+		queue:          queue,
 		runCancels:     map[string]context.CancelFunc{},
 		cancelRequests: map[string]struct{}{},
 	}
@@ -202,6 +209,16 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 	sc = s.applyRunGuardrails(sc)
 
 	runRecord := s.store.CreateRun(scenarioID, sc)
+	if s.queue != nil {
+		if err := s.queue.EnqueueRun(r.Context(), runRecord.ID); err != nil {
+			s.store.ErrorRun(runRecord.ID, fmt.Errorf("enqueue run: %w", err))
+			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("enqueue run: %w", err))
+			return
+		}
+		writeJSON(w, http.StatusAccepted, runRecord)
+		return
+	}
+
 	if req.Sync {
 		s.executeRun(r.Context(), runRecord.ID, sc)
 		updated, _ := s.store.GetRun(runRecord.ID)
@@ -248,6 +265,11 @@ func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.requestRunCancel(id) {
+		if s.queue != nil && record.Status == store.RunQueued {
+			s.store.CancelRun(id, canceledReport(id, record.Scenario.Name, "run canceled before worker execution"))
+			writeJSON(w, http.StatusAccepted, map[string]any{"id": id, "status": store.RunCanceled})
+			return
+		}
 		writeError(w, http.StatusConflict, fmt.Errorf("run %q is not currently cancellable", id))
 		return
 	}
@@ -324,6 +346,10 @@ func isCancelableRunStatus(status store.RunStatus) bool {
 }
 
 func reportFromRunError(id string, scenarioName string, err error) report.Report {
+	return canceledReport(id, scenarioName, err.Error())
+}
+
+func canceledReport(id string, scenarioName string, message string) report.Report {
 	now := time.Now().UTC()
 	return report.Report{
 		RunID:      id,
@@ -331,7 +357,7 @@ func reportFromRunError(id string, scenarioName string, err error) report.Report
 		Status:     report.StatusCanceled,
 		StartedAt:  now,
 		FinishedAt: now,
-		Failures:   []string{err.Error()},
+		Failures:   []string{message},
 	}
 }
 
