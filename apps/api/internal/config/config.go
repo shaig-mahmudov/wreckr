@@ -27,6 +27,7 @@ type Guardrails struct {
 	MaxRunDuration      time.Duration
 	MaxRequestBodyBytes int64
 	TargetAllowlist     []string
+	AllowMetadataTarget bool
 }
 
 func FromEnv() Config {
@@ -42,12 +43,21 @@ func FromEnv() Config {
 			MaxRunDuration:      time.Duration(envInt("WRECKR_MAX_RUN_DURATION_SECONDS", int(runTimeout.Seconds()))) * time.Second,
 			MaxRequestBodyBytes: int64(envInt("WRECKR_MAX_REQUEST_BODY_BYTES", int(maxBodyBytes))),
 			TargetAllowlist:     envCSV("WRECKR_TARGET_ALLOWLIST"),
+			AllowMetadataTarget: envBool("WRECKR_ALLOW_METADATA_TARGETS", false),
 		},
 		StoreBackend:      envString("WRECKR_STORE", "memory"),
 		DatabaseURL:       envString("DATABASE_URL", "postgres://wreckr:wreckr@localhost:5432/wreckr?sslmode=disable"),
 		RedisAddr:         envString("REDIS_ADDR", "localhost:6379"),
 		WorkerConcurrency: envInt("WRECKR_WORKER_CONCURRENCY", 4),
 	}
+}
+
+func envBool(key string, fallback bool) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if value == "" {
+		return fallback
+	}
+	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
 func envString(key string, fallback string) string {

@@ -50,6 +50,159 @@ func (p *Postgres) Close() error {
 	return p.db.Close()
 }
 
+func (p *Postgres) CreateTarget(target TargetRecord) TargetRecord {
+	ctx, cancel := storeContext()
+	defer cancel()
+
+	headers := target.Headers
+	if headers == nil {
+		headers = map[string]string{}
+	}
+	rawHeaders, err := json.Marshal(headers)
+	if err != nil {
+		return TargetRecord{}
+	}
+
+	slug := uniqueSlug(target.Name)
+	var record TargetRecord
+	var environment string
+	err = p.db.QueryRowContext(ctx, `
+		INSERT INTO targets (project_id, name, slug, protocol, base_url, environment, description, headers)
+		VALUES ($1, $2, $3, 'http', $4, $5, $6, $7)
+		RETURNING id::text, name, base_url, environment::text, description, headers, created_at, updated_at
+	`, p.projectID, target.Name, slug, target.BaseURL, target.Environment, target.Description, rawHeaders).Scan(
+		&record.ID,
+		&record.Name,
+		&record.BaseURL,
+		&environment,
+		&record.Description,
+		&rawHeaders,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	)
+	if err != nil {
+		return TargetRecord{}
+	}
+	record.Environment = TargetEnvironment(environment)
+	_ = json.Unmarshal(rawHeaders, &record.Headers)
+	return record
+}
+
+func (p *Postgres) UpdateTarget(id string, target TargetRecord) (TargetRecord, bool) {
+	ctx, cancel := storeContext()
+	defer cancel()
+
+	headers := target.Headers
+	if headers == nil {
+		headers = map[string]string{}
+	}
+	rawHeaders, err := json.Marshal(headers)
+	if err != nil {
+		return TargetRecord{}, false
+	}
+
+	var record TargetRecord
+	var environment string
+	err = p.db.QueryRowContext(ctx, `
+		UPDATE targets
+		SET name = $2,
+			base_url = $3,
+			environment = $4,
+			description = $5,
+			headers = $6
+		WHERE id = $1 AND project_id = $7
+		RETURNING id::text, name, base_url, environment::text, description, headers, created_at, updated_at
+	`, id, target.Name, target.BaseURL, target.Environment, target.Description, rawHeaders, p.projectID).Scan(
+		&record.ID,
+		&record.Name,
+		&record.BaseURL,
+		&environment,
+		&record.Description,
+		&rawHeaders,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	)
+	if err != nil {
+		return TargetRecord{}, false
+	}
+	record.Environment = TargetEnvironment(environment)
+	_ = json.Unmarshal(rawHeaders, &record.Headers)
+	return record, true
+}
+
+func (p *Postgres) DeleteTarget(id string) bool {
+	ctx, cancel := storeContext()
+	defer cancel()
+	result, err := p.db.ExecContext(ctx, `
+		DELETE FROM targets
+		WHERE id = $1 AND project_id = $2
+	`, id, p.projectID)
+	if err != nil {
+		return false
+	}
+	rows, err := result.RowsAffected()
+	return err == nil && rows > 0
+}
+
+func (p *Postgres) GetTarget(id string) (TargetRecord, bool) {
+	ctx, cancel := storeContext()
+	defer cancel()
+
+	var record TargetRecord
+	var rawHeaders []byte
+	var environment string
+	err := p.db.QueryRowContext(ctx, `
+		SELECT id::text, name, base_url, environment::text, description, headers, created_at, updated_at
+		FROM targets
+		WHERE id = $1 AND project_id = $2
+	`, id, p.projectID).Scan(
+		&record.ID,
+		&record.Name,
+		&record.BaseURL,
+		&environment,
+		&record.Description,
+		&rawHeaders,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	)
+	if err != nil {
+		return TargetRecord{}, false
+	}
+	record.Environment = TargetEnvironment(environment)
+	_ = json.Unmarshal(rawHeaders, &record.Headers)
+	return record, true
+}
+
+func (p *Postgres) ListTargets() []TargetRecord {
+	ctx, cancel := storeContext()
+	defer cancel()
+
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT id::text, name, base_url, environment::text, description, headers, created_at, updated_at
+		FROM targets
+		WHERE project_id = $1
+		ORDER BY created_at DESC
+	`, p.projectID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var records []TargetRecord
+	for rows.Next() {
+		var record TargetRecord
+		var rawHeaders []byte
+		var environment string
+		if err := rows.Scan(&record.ID, &record.Name, &record.BaseURL, &environment, &record.Description, &rawHeaders, &record.CreatedAt, &record.UpdatedAt); err != nil {
+			return nil
+		}
+		record.Environment = TargetEnvironment(environment)
+		_ = json.Unmarshal(rawHeaders, &record.Headers)
+		records = append(records, record)
+	}
+	return records
+}
+
 func (p *Postgres) CreateScenario(sc scenario.Scenario) ScenarioRecord {
 	ctx, cancel := storeContext()
 	defer cancel()
@@ -242,7 +395,7 @@ func (p *Postgres) ListScenarioVersions(id string) []ScenarioVersionRecord {
 	return records
 }
 
-func (p *Postgres) CreateRun(scenarioID string, sc scenario.Scenario) RunRecord {
+func (p *Postgres) CreateRun(scenarioID string, targetID string, sc scenario.Scenario) RunRecord {
 	ctx, cancel := storeContext()
 	defer cancel()
 
@@ -252,8 +405,12 @@ func (p *Postgres) CreateRun(scenarioID string, sc scenario.Scenario) RunRecord 
 	}
 
 	var scenarioParam any
+	var targetParam any
 	var versionParam any
 	var versionNumber int
+	if targetID != "" {
+		targetParam = targetID
+	}
 	if scenarioID != "" {
 		versionID, currentVersionNumber, ok := p.currentScenarioVersion(ctx, scenarioID)
 		if ok {
@@ -265,10 +422,10 @@ func (p *Postgres) CreateRun(scenarioID string, sc scenario.Scenario) RunRecord 
 
 	var record RunRecord
 	err = p.db.QueryRowContext(ctx, `
-		INSERT INTO runs (project_id, scenario_id, scenario_version_id, status, scenario_snapshot)
-		VALUES ($1, $2, $3, 'queued', $4)
-		RETURNING id::text, COALESCE(scenario_id::text, ''), COALESCE(scenario_version_id::text, ''), status::text, created_at
-	`, p.projectID, scenarioParam, versionParam, raw).Scan(&record.ID, &record.ScenarioID, &record.ScenarioVersionID, &record.Status, &record.CreatedAt)
+		INSERT INTO runs (project_id, target_id, scenario_id, scenario_version_id, status, scenario_snapshot)
+		VALUES ($1, $2, $3, $4, 'queued', $5)
+		RETURNING id::text, COALESCE(target_id::text, ''), COALESCE(scenario_id::text, ''), COALESCE(scenario_version_id::text, ''), status::text, created_at
+	`, p.projectID, targetParam, scenarioParam, versionParam, raw).Scan(&record.ID, &record.TargetID, &record.ScenarioID, &record.ScenarioVersionID, &record.Status, &record.CreatedAt)
 	if err != nil {
 		return RunRecord{}
 	}
@@ -283,6 +440,7 @@ func (p *Postgres) CreateRun(scenarioID string, sc scenario.Scenario) RunRecord 
 			"scenario_version_id":     record.ScenarioVersionID,
 			"scenario_version_number": record.ScenarioVersionNumber,
 			"scenario":                sc.Name,
+			"target_id":               record.TargetID,
 		},
 	})
 	return record
@@ -525,6 +683,7 @@ func (p *Postgres) getRun(ctx context.Context, id string) (RunRecord, bool) {
 	var errorText sql.NullString
 	err := p.db.QueryRowContext(ctx, `
 		SELECT runs.id::text,
+			COALESCE(runs.target_id::text, ''),
 			COALESCE(runs.scenario_id::text, ''),
 			COALESCE(runs.scenario_version_id::text, ''),
 			COALESCE(sv.version_number, 0),
@@ -539,6 +698,7 @@ func (p *Postgres) getRun(ctx context.Context, id string) (RunRecord, bool) {
 		WHERE runs.id = $1
 	`, id).Scan(
 		&record.ID,
+		&record.TargetID,
 		&record.ScenarioID,
 		&record.ScenarioVersionID,
 		&record.ScenarioVersionNumber,
