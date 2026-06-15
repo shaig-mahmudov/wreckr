@@ -37,13 +37,26 @@ func Validate(sc scenario.Scenario, cfg config.Guardrails) error {
 	if err != nil {
 		problems = append(problems, "target.base_url "+err.Error())
 	} else {
-		validateTargetURL(&problems, "target.base_url", baseURL, cfg.TargetAllowlist)
+		validateTargetURL(&problems, "target.base_url", baseURL, cfg.TargetAllowlist, cfg.AllowMetadataTarget)
 		validateRequestTargets(&problems, "setup", baseURL, sc.Setup, cfg.TargetAllowlist)
 		validateRequestTargets(&problems, "requests", baseURL, sc.Requests, cfg.TargetAllowlist)
 		validateRequestTargets(&problems, "teardown", baseURL, sc.Teardown, cfg.TargetAllowlist)
 		validateInvariantTargets(&problems, baseURL, sc.Invariants, cfg.TargetAllowlist)
 	}
 
+	if len(problems) > 0 {
+		return ViolationError{Problems: problems}
+	}
+	return nil
+}
+
+func ValidateTargetBaseURL(raw string, cfg config.Guardrails) error {
+	baseURL, err := parseTargetURL(raw)
+	if err != nil {
+		return ViolationError{Problems: []string{"target.base_url " + err.Error()}}
+	}
+	var problems []string
+	validateTargetURL(&problems, "target.base_url", baseURL, cfg.TargetAllowlist, cfg.AllowMetadataTarget)
 	if len(problems) > 0 {
 		return ViolationError{Problems: problems}
 	}
@@ -85,13 +98,13 @@ func validatePathTarget(problems *[]string, field string, baseURL *url.URL, rawP
 		*problems = append(*problems, fmt.Sprintf("%s %s", field, err.Error()))
 		return
 	}
-	validateTargetURL(problems, field, targetURL, allowlist)
+	validateTargetURL(problems, field, targetURL, allowlist, false)
 	if absolute && len(allowlist) == 0 && !sameOrigin(baseURL, targetURL) {
 		*problems = append(*problems, fmt.Sprintf("%s absolute URL host %q does not match target.base_url host %q; configure target allowlist to permit external targets", field, targetURL.Host, baseURL.Host))
 	}
 }
 
-func validateTargetURL(problems *[]string, field string, targetURL *url.URL, allowlist []string) {
+func validateTargetURL(problems *[]string, field string, targetURL *url.URL, allowlist []string, allowMetadataTarget bool) {
 	if targetURL.Scheme != "http" && targetURL.Scheme != "https" {
 		*problems = append(*problems, fmt.Sprintf("%s must use http or https", field))
 	}
@@ -104,7 +117,7 @@ func validateTargetURL(problems *[]string, field string, targetURL *url.URL, all
 	if strings.ContainsAny(targetURL.Host, " \t\r\n") {
 		*problems = append(*problems, fmt.Sprintf("%s host must not contain whitespace", field))
 	}
-	if isMetadataHost(targetURL.Hostname()) && !matchesAllowlist(targetURL, allowlist) {
+	if isMetadataHost(targetURL.Hostname()) && !allowMetadataTarget && !matchesAllowlist(targetURL, allowlist) {
 		*problems = append(*problems, fmt.Sprintf("%s host %q is blocked because it targets instance metadata", field, targetURL.Hostname()))
 	}
 	if len(allowlist) > 0 && !matchesAllowlist(targetURL, allowlist) {

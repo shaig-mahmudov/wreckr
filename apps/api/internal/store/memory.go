@@ -21,6 +21,26 @@ const (
 	RunCanceled RunStatus = "canceled"
 )
 
+type TargetEnvironment string
+
+const (
+	TargetLocal       TargetEnvironment = "local"
+	TargetDevelopment TargetEnvironment = "development"
+	TargetStaging     TargetEnvironment = "staging"
+	TargetProduction  TargetEnvironment = "production"
+)
+
+type TargetRecord struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	BaseURL     string            `json:"baseUrl"`
+	Environment TargetEnvironment `json:"environment"`
+	Description string            `json:"description,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+}
+
 type ScenarioRecord struct {
 	ID                   string            `json:"id"`
 	Scenario             scenario.Scenario `json:"scenario"`
@@ -31,6 +51,7 @@ type ScenarioRecord struct {
 
 type RunRecord struct {
 	ID                    string            `json:"id"`
+	TargetID              string            `json:"target_id,omitempty"`
 	ScenarioID            string            `json:"scenario_id,omitempty"`
 	ScenarioVersionID     string            `json:"scenario_version_id,omitempty"`
 	ScenarioVersionNumber int               `json:"scenario_version_number,omitempty"`
@@ -53,6 +74,7 @@ type ScenarioVersionRecord struct {
 
 type Memory struct {
 	mu               sync.RWMutex
+	targets          map[string]TargetRecord
 	scenarios        map[string]ScenarioRecord
 	scenarioVersions map[string][]ScenarioVersionRecord
 	runs             map[string]RunRecord
@@ -63,11 +85,70 @@ var _ Store = (*Memory)(nil)
 
 func NewMemory() *Memory {
 	return &Memory{
+		targets:          map[string]TargetRecord{},
 		scenarios:        map[string]ScenarioRecord{},
 		scenarioVersions: map[string][]ScenarioVersionRecord{},
 		runs:             map[string]RunRecord{},
 		runEvents:        map[string][]runevent.Event{},
 	}
+}
+
+func (m *Memory) CreateTarget(target TargetRecord) TargetRecord {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now().UTC()
+	target.ID = fmt.Sprintf("tgt_%d", now.UnixNano())
+	target.CreatedAt = now
+	target.UpdatedAt = now
+	if target.Headers == nil {
+		target.Headers = map[string]string{}
+	}
+	m.targets[target.ID] = target
+	return target
+}
+
+func (m *Memory) UpdateTarget(id string, target TargetRecord) (TargetRecord, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, ok := m.targets[id]
+	if !ok {
+		return TargetRecord{}, false
+	}
+	target.ID = id
+	target.CreatedAt = current.CreatedAt
+	target.UpdatedAt = time.Now().UTC()
+	if target.Headers == nil {
+		target.Headers = map[string]string{}
+	}
+	m.targets[id] = target
+	return target, true
+}
+
+func (m *Memory) DeleteTarget(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.targets[id]; !ok {
+		return false
+	}
+	delete(m.targets, id)
+	return true
+}
+
+func (m *Memory) GetTarget(id string) (TargetRecord, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	target, ok := m.targets[id]
+	return target, ok
+}
+
+func (m *Memory) ListTargets() []TargetRecord {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]TargetRecord, 0, len(m.targets))
+	for _, target := range m.targets {
+		out = append(out, target)
+	}
+	return out
 }
 
 func (m *Memory) CreateScenario(sc scenario.Scenario) ScenarioRecord {
@@ -131,21 +212,31 @@ func (m *Memory) ListScenarioVersions(id string) []ScenarioVersionRecord {
 func (m *Memory) GetScenarioVersion(id string, versionNumber int) (ScenarioVersionRecord, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	for _, version := range m.scenarioVersions[id] {
 		if version.VersionNumber == versionNumber {
 			return version, true
 		}
 	}
+
 	return ScenarioVersionRecord{}, false
 }
 
-func (m *Memory) CreateRun(scenarioID string, sc scenario.Scenario, versionRef ...ScenarioVersionRecord) RunRecord {
+func (m *Memory) CreateRun(
+	scenarioID string,
+	targetID string,
+	sc scenario.Scenario,
+	versionRef ...ScenarioVersionRecord,
+) RunRecord {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	now := time.Now().UTC()
 	id := fmt.Sprintf("run_%d", now.UnixNano())
+
 	var versionID string
 	var versionNumber int
+
 	if len(versionRef) > 0 {
 		versionID = versionRef[0].ID
 		versionNumber = versionRef[0].VersionNumber
@@ -157,6 +248,7 @@ func (m *Memory) CreateRun(scenarioID string, sc scenario.Scenario, versionRef .
 	}
 	record := RunRecord{
 		ID:                    id,
+		TargetID:              targetID,
 		ScenarioID:            scenarioID,
 		ScenarioVersionID:     versionID,
 		ScenarioVersionNumber: versionNumber,
@@ -174,6 +266,7 @@ func (m *Memory) CreateRun(scenarioID string, sc scenario.Scenario, versionRef .
 			"scenario_version_id":     versionID,
 			"scenario_version_number": versionNumber,
 			"scenario":                sc.Name,
+			"target_id":               targetID,
 		},
 	})
 	return record

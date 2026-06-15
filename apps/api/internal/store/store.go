@@ -7,6 +7,12 @@ import (
 )
 
 type Store interface {
+	CreateTarget(target TargetRecord) TargetRecord
+	UpdateTarget(id string, target TargetRecord) (TargetRecord, bool)
+	DeleteTarget(id string) bool
+	GetTarget(id string) (TargetRecord, bool)
+	ListTargets() []TargetRecord
+
 	CreateScenario(sc scenario.Scenario) ScenarioRecord
 	UpdateScenario(id string, sc scenario.Scenario) (ScenarioRecord, bool)
 	GetScenario(id string) (ScenarioRecord, bool)
@@ -14,7 +20,13 @@ type Store interface {
 	ListScenarioVersions(id string) []ScenarioVersionRecord
 	GetScenarioVersion(id string, versionNumber int) (ScenarioVersionRecord, bool)
 
-	CreateRun(scenarioID string, sc scenario.Scenario, versionRef ...ScenarioVersionRecord) RunRecord
+	CreateRun(
+		scenarioID string,
+		targetID string,
+		sc scenario.Scenario,
+		versionRef ...ScenarioVersionRecord,
+	) RunRecord
+  
 	MarkRunStarted(id string)
 	CompleteRun(id string, rep report.Report)
 	CancelRun(id string, rep report.Report)

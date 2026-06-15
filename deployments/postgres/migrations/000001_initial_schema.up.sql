@@ -15,6 +15,13 @@ CREATE TYPE target_protocol AS ENUM (
     'queue'
 );
 
+CREATE TYPE target_environment AS ENUM (
+    'local',
+    'development',
+    'staging',
+    'production'
+);
+
 CREATE TYPE scenario_version_status AS ENUM (
     'draft',
     'active',
@@ -46,6 +53,8 @@ CREATE TABLE targets (
     slug TEXT NOT NULL,
     protocol target_protocol NOT NULL DEFAULT 'http',
     base_url TEXT NOT NULL,
+    environment target_environment NOT NULL DEFAULT 'development',
+    description TEXT NOT NULL DEFAULT '',
     headers JSONB NOT NULL DEFAULT '{}'::jsonb,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

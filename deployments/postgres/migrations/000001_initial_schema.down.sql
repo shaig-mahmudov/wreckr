@@ -29,6 +29,7 @@ DROP TABLE IF EXISTS projects;
 
 DROP TYPE IF EXISTS run_status;
 DROP TYPE IF EXISTS scenario_version_status;
+DROP TYPE IF EXISTS target_environment;
 DROP TYPE IF EXISTS target_protocol;
 
 DROP FUNCTION IF EXISTS set_updated_at();

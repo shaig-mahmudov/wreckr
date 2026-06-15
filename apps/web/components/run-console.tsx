@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { checkoutRaceScenario, loginBurstScenario } from "../lib/sample-scenarios";
 import { useAPIURL } from "../lib/use-api-url";
+import { TargetManager, type TargetRecord } from "./target-manager";
+
 
 type WreckrReport = {
   status: "passed" | "failed" | "canceled";
@@ -27,6 +29,7 @@ type WreckrReport = {
 
 type RunRecord = {
   id: string;
+  target_id?: string;
   scenario_id?: string;
   status: "queued" | "running" | "passed" | "failed" | "errored" | "canceled";
   scenario?: {
@@ -100,6 +103,9 @@ export function RunConsole() {
   const [apiState, setAPIState] = useState<"checking" | "connected" | "offline">("checking");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  const [targets, setTargets] = useState<TargetRecord[]>([]);
+  const [selectedTargetID, setSelectedTargetID] = useState<string>("");
 
   const parsedScenario = useMemo(() => {
     try {
@@ -173,6 +179,19 @@ export function RunConsole() {
     };
   }, [apiURL, selectedRunID]);
 
+  async function refreshTargets() {
+    try {
+      const baseURL = apiURL.replace(/\/$/, "");
+      const response = await fetch(`${baseURL}/v1/targets`, { cache: "no-store" });
+      const payload = await response.json();
+      if (response.ok) {
+        setTargets(payload.targets ?? []);
+      }
+    } catch (err) {
+      // Ignore errors here, refreshRuns handles connection state
+    }
+  }
+
   function selectSample(id: string) {
     const sample = samples.find((item) => item.id === id) ?? samples[0];
     setSelectedSample(sample.id);
@@ -210,6 +229,7 @@ export function RunConsole() {
       setRuns([]);
       setError(err instanceof Error ? err.message : "Could not connect to the Wreckr API.");
     }
+    void refreshTargets();
   }
 
   async function runScenario() {
@@ -224,7 +244,11 @@ export function RunConsole() {
       const response = await fetch(`${apiURL.replace(/\/$/, "")}/v1/runs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario: parsedScenario, sync: false })
+        body: JSON.stringify({ 
+          scenario: parsedScenario, 
+          sync: false,
+          target_id: selectedTargetID || undefined 
+        })
       });
       const payload = (await response.json()) as RunResponse;
       if (!response.ok) {
@@ -306,7 +330,20 @@ export function RunConsole() {
               <Activity size={16} />
               <span>{apiState}</span>
             </div>
-            <button className="icon-button" type="button" onClick={() => selectSample(selectedSample)} title="Reload sample">
+            <label style={{maxWidth: 200}}>
+              <span>Target</span>
+              <select 
+                value={selectedTargetID} 
+                onChange={(e) => setSelectedTargetID(e.target.value)}
+                style={{height: 40, padding: '0 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--surface)'}}
+              >
+                <option value="">Default (From Scenario)</option>
+                {targets.map(t => (
+                  <option key={t.id} value={t.id}>{t.name} ({t.environment})</option>
+                ))}
+              </select>
+            </label>
+            <button className="icon-button" type="button" onClick={() => { selectSample(selectedSample); void refreshTargets(); }} title="Reload sample">
               <RefreshCw size={18} />
             </button>
             <button className="run-button" type="button" onClick={runScenario} disabled={!canRun}>
@@ -406,6 +443,12 @@ export function RunConsole() {
           </section>
         </section>
       </section>
+
+      <div style={{marginTop: 40}}>
+        <div className="workspace" style={{display: 'block'}}>
+          <TargetManager apiURL={apiURL} />
+        </div>
+      </div>
     </main>
   );
 }
