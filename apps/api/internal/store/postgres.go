@@ -450,11 +450,18 @@ func (p *Postgres) MarkRunStarted(id string) {
 	ctx, cancel := storeContext()
 	defer cancel()
 
-	_, _ = p.db.ExecContext(ctx, `
+	result, err := p.db.ExecContext(ctx, `
 		UPDATE runs
 		SET status = 'running', started_at = COALESCE(started_at, now())
-		WHERE id = $1
+		WHERE id = $1 AND status IN ('queued', 'running')
 	`, id)
+	if err != nil {
+		return
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows == 0 {
+		return
+	}
 	p.appendRunEvent(ctx, id, runevent.Event{
 		Level:   runevent.LevelInfo,
 		Type:    runevent.TypeRunStarted,
@@ -467,7 +474,9 @@ func (p *Postgres) CompleteRun(id string, rep report.Report) {
 	if rep.Status == report.StatusFailed {
 		status = RunFailed
 	}
-	p.finishRunWithReport(id, status, rep, "")
+	if !p.finishRunWithReport(id, status, rep, "") {
+		return
+	}
 	eventType := runevent.TypeRunCompleted
 	level := runevent.LevelInfo
 	message := "run completed"
@@ -491,7 +500,9 @@ func (p *Postgres) CompleteRun(id string, rep report.Report) {
 
 func (p *Postgres) CancelRun(id string, rep report.Report) {
 	rep.Status = report.StatusCanceled
-	p.finishRunWithReport(id, RunCanceled, rep, "run canceled")
+	if !p.finishRunWithReport(id, RunCanceled, rep, "run canceled") {
+		return
+	}
 	p.AppendRunEvent(id, runevent.Event{
 		Level:   runevent.LevelWarn,
 		Type:    runevent.TypeRunCanceled,
@@ -502,7 +513,7 @@ func (p *Postgres) CancelRun(id string, rep report.Report) {
 	})
 }
 
-func (p *Postgres) finishRunWithReport(id string, status RunStatus, rep report.Report, errorMessage string) {
+func (p *Postgres) finishRunWithReport(id string, status RunStatus, rep report.Report, errorMessage string) bool {
 	ctx, cancel := storeContext()
 	defer cancel()
 
@@ -513,7 +524,7 @@ func (p *Postgres) finishRunWithReport(id string, status RunStatus, rep report.R
 	}
 	rawReport, err := json.Marshal(rep)
 	if err != nil {
-		return
+		return false
 	}
 	summary, _ := json.Marshal(rep.Summary)
 	thresholds, _ := json.Marshal(rep.Thresholds)
@@ -522,16 +533,21 @@ func (p *Postgres) finishRunWithReport(id string, status RunStatus, rep report.R
 
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
-		return
+		return false
 	}
 	defer rollbackUnlessCommitted(tx)
 
-	if _, err := tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		UPDATE runs
 		SET status = $2, finished_at = now(), error = NULLIF($3, '')
-		WHERE id = $1
-	`, id, status, errorMessage); err != nil {
-		return
+		WHERE id = $1 AND status IN ('queued', 'running')
+	`, id, status, errorMessage)
+	if err != nil {
+		return false
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows == 0 {
+		return false
 	}
 
 	if _, err := tx.ExecContext(ctx, `
@@ -546,10 +562,10 @@ func (p *Postgres) finishRunWithReport(id string, status RunStatus, rep report.R
 			failures = EXCLUDED.failures,
 			raw_report = EXCLUDED.raw_report
 	`, id, status, summary, thresholds, invariants, failures, rawReport); err != nil {
-		return
+		return false
 	}
 
-	_ = tx.Commit()
+	return tx.Commit() == nil
 }
 
 func (p *Postgres) ErrorRun(id string, err error) {
@@ -560,11 +576,18 @@ func (p *Postgres) ErrorRun(id string, err error) {
 	if err != nil {
 		message = err.Error()
 	}
-	_, _ = p.db.ExecContext(ctx, `
+	result, err := p.db.ExecContext(ctx, `
 		UPDATE runs
 		SET status = 'errored', error = $2, finished_at = now()
-		WHERE id = $1
+		WHERE id = $1 AND status IN ('queued', 'running')
 	`, id, message)
+	if err != nil {
+		return
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows == 0 {
+		return
+	}
 	p.appendRunEvent(ctx, id, runevent.Event{
 		Level:   runevent.LevelError,
 		Type:    runevent.TypeRunFailed,
@@ -615,6 +638,82 @@ func (p *Postgres) ListRuns() []RunRecord {
 		records = append(records, record)
 	}
 	return records
+}
+
+func (p *Postgres) RequestRunCancel(id string) bool {
+	ctx, cancel := storeContext()
+	defer cancel()
+
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false
+	}
+	defer rollbackUnlessCommitted(tx)
+
+	var status RunStatus
+	if err := tx.QueryRowContext(ctx, `
+		SELECT status::text
+		FROM runs
+		WHERE id = $1
+		FOR UPDATE
+	`, id).Scan(&status); err != nil {
+		return false
+	}
+	if !isCancelableRunStatus(status) {
+		return false
+	}
+
+	var alreadyRequested bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM run_events
+			WHERE run_id = $1 AND type = $2
+		)
+	`, id, runevent.TypeCancelRequested).Scan(&alreadyRequested); err != nil {
+		return false
+	}
+	if alreadyRequested {
+		return tx.Commit() == nil
+	}
+
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, id); err != nil {
+		return false
+	}
+	var sequence int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(sequence), 0) + 1
+		FROM run_events
+		WHERE run_id = $1
+	`, id).Scan(&sequence); err != nil {
+		return false
+	}
+	raw, err := json.Marshal(map[string]any{"status": string(status)})
+	if err != nil {
+		return false
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO run_events (run_id, sequence, level, type, message, data, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, id, sequence, runevent.LevelWarn, runevent.TypeCancelRequested, "run cancellation requested", raw, time.Now().UTC()); err != nil {
+		return false
+	}
+	return tx.Commit() == nil
+}
+
+func (p *Postgres) IsRunCancelRequested(id string) bool {
+	ctx, cancel := storeContext()
+	defer cancel()
+
+	var requested bool
+	err := p.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM run_events
+			WHERE run_id = $1 AND type = $2
+		)
+	`, id, runevent.TypeCancelRequested).Scan(&requested)
+	return err == nil && requested
 }
 
 func (p *Postgres) AppendRunEvent(runID string, event runevent.Event) runevent.Event {

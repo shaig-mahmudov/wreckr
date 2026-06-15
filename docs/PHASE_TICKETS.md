@@ -146,6 +146,7 @@ Dependencies:
 Notes:
 
 - Current API run creation already enqueues `runs.execute` jobs through Asynq.
+- Durable cancellation requests and worker-owned running cancellation are implemented; retry/dead-letter visibility and worker metrics remain open.
 
 ## WRK-P4: Add k6 Compiler
 

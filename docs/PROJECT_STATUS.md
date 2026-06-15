@@ -1,6 +1,6 @@
 # Wreckr Project Status
 
-Last updated: 2026-06-15
+Last updated: 2026-06-16
 
 ## Current State
 
@@ -26,7 +26,7 @@ The Docker Compose stack is the most complete local environment. It starts the A
   - p95 latency
 - Request-rate pacing with `traffic.rate_per_second`.
 - Context timeout handling for safe run shutdown.
-- Run cancellation for in-process API runs and queued worker runs before execution.
+- Run cancellation for in-process API runs, queued worker runs before execution, and worker-owned running jobs through durable cancellation requests.
 - Partial canceled reports saved after cancellation.
 - Scenario create, update, get, list, and version list endpoints.
 - Target create, update, get, list, and delete endpoints.
@@ -112,17 +112,16 @@ The repository currently has automated coverage for:
 - Guardrail enforcement.
 - Request-rate pacing.
 - Worker execution of queued runs.
+- Distributed cancellation for worker-owned running runs.
 - Target CRUD endpoints.
 - Target resolution for API-created runs with `target_id`.
 
 Coverage gaps:
 
 - Dashboard target management and live timeline behavior are not covered by browser or component tests yet.
-- Distributed cancellation of a worker-owned running job is not covered because the feature is not implemented yet.
 
 ## Main Gaps
 
-- Worker-owned running jobs do not yet support distributed cancellation from the API.
 - Async orchestration does not yet expose retry/dead-letter dashboards or persisted retry visibility.
 - Run event streaming uses SSE today; WebSocket support is not implemented.
 - k6 script generation is not implemented yet.
@@ -134,9 +133,8 @@ Coverage gaps:
 
 ## Recommended Next Milestones
 
-1. Add distributed cancellation for worker-owned running jobs.
-2. Add worker retry/dead-letter visibility into the persisted timeline and dashboard.
-3. Add persisted scenario editing to the dashboard.
-4. Add object storage for raw reports, logs, generated scripts, and artifacts.
-5. Add OpenTelemetry traces and richer Prometheus metrics.
-6. Add k6 compilation for higher-scale HTTP workloads.
+1. Add worker retry/dead-letter visibility into the persisted timeline and dashboard.
+2. Add persisted scenario editing to the dashboard.
+3. Add object storage for raw reports, logs, generated scripts, and artifacts.
+4. Add OpenTelemetry traces and richer Prometheus metrics.
+5. Add k6 compilation for higher-scale HTTP workloads.
