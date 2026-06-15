@@ -197,6 +197,7 @@ Dependencies:
 Notes:
 
 - The runner package should remain the domain engine; k6 is an execution backend, not a replacement for the scenario model.
+- Deterministic script generation and the `wreckr compile-k6` CLI command are implemented; k6 execution, summary parsing, and normalized report import remain open.
 
 ## WRK-P5: Expand Observability
 
