@@ -128,14 +128,28 @@ func (m *Memory) ListScenarioVersions(id string) []ScenarioVersionRecord {
 	return out
 }
 
-func (m *Memory) CreateRun(scenarioID string, sc scenario.Scenario) RunRecord {
+func (m *Memory) GetScenarioVersion(id string, versionNumber int) (ScenarioVersionRecord, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, version := range m.scenarioVersions[id] {
+		if version.VersionNumber == versionNumber {
+			return version, true
+		}
+	}
+	return ScenarioVersionRecord{}, false
+}
+
+func (m *Memory) CreateRun(scenarioID string, sc scenario.Scenario, versionRef ...ScenarioVersionRecord) RunRecord {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now().UTC()
 	id := fmt.Sprintf("run_%d", now.UnixNano())
 	var versionID string
 	var versionNumber int
-	if scenarioID != "" {
+	if len(versionRef) > 0 {
+		versionID = versionRef[0].ID
+		versionNumber = versionRef[0].VersionNumber
+	} else if scenarioID != "" {
 		if record, ok := m.scenarios[scenarioID]; ok {
 			versionID = record.CurrentVersionID
 			versionNumber = record.CurrentVersionNumber
