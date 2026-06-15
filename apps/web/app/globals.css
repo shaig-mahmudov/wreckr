@@ -63,6 +63,29 @@ button:disabled {
   border-bottom: 1px solid var(--line);
 }
 
+.topbar-actions,
+.nav-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nav-actions a,
+.text-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--surface);
+  color: var(--blue);
+  font-size: 0.86rem;
+  font-weight: 850;
+  text-decoration: none;
+}
+
 .eyebrow {
   margin: 0 0 4px;
   color: var(--blue);
@@ -122,14 +145,30 @@ h2 {
   padding-top: 22px;
 }
 
+.editor-layout {
+  display: grid;
+  grid-template-columns: minmax(460px, 1fr) 360px;
+  gap: 20px;
+  padding-top: 22px;
+}
+
 .scenario-panel,
-.result-panel {
+.result-panel,
+.editor-side {
   min-width: 0;
+}
+
+.editor-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .panel-head,
 .toolbar,
-.section-title {
+.section-title,
+.editor-toolbar,
+.list-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -174,6 +213,35 @@ h2 {
 }
 
 .sample-tabs button.active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 4px rgba(40, 35, 26, 0.1);
+}
+
+.segmented-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.segmented-control button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 850;
+}
+
+.segmented-control button.active {
   background: var(--surface);
   color: var(--ink);
   box-shadow: 0 1px 4px rgba(40, 35, 26, 0.1);
@@ -275,6 +343,20 @@ textarea:focus {
   font-weight: 850;
 }
 
+.text-button svg {
+  margin-right: 6px;
+}
+
+.run-button.secondary {
+  border-color: var(--blue);
+  background: var(--blue);
+}
+
+.run-button,
+.icon-button {
+  text-decoration: none;
+}
+
 .api-pill {
   display: inline-flex;
   align-items: center;
@@ -310,7 +392,7 @@ textarea:focus {
 
 .notice {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   min-height: 44px;
   border-radius: 8px;
@@ -318,10 +400,24 @@ textarea:focus {
   font-weight: 750;
 }
 
+.notice ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .notice.bad {
   border: 1px solid rgba(191, 45, 69, 0.28);
   background: var(--red-soft);
   color: var(--red);
+}
+
+.notice.good {
+  border: 1px solid rgba(20, 125, 100, 0.28);
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .metric-grid {
@@ -366,6 +462,165 @@ textarea:focus {
 
 .section-title h2 {
   color: var(--ink);
+}
+
+.section-title.compact {
+  min-height: auto;
+  padding: 0;
+  border-bottom: 0;
+}
+
+.list-toolbar {
+  margin-top: 20px;
+  min-height: 48px;
+}
+
+.list-toolbar label,
+.action-panel label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.list-toolbar input,
+.action-panel input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--surface);
+  color: var(--ink);
+  outline: none;
+}
+
+.scenario-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.scenario-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(320px, 1.2fr) 32px;
+  gap: 18px;
+  align-items: center;
+  min-height: 96px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+  box-shadow: var(--shadow);
+}
+
+.scenario-card:hover {
+  border-color: rgba(40, 103, 168, 0.45);
+}
+
+.scenario-card > div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.scenario-card strong,
+.scenario-card span,
+.scenario-card dd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenario-card strong {
+  font-size: 1rem;
+}
+
+.scenario-card span {
+  color: var(--muted);
+}
+
+.scenario-card dl,
+.detail-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.scenario-card dl {
+  grid-template-columns: 92px minmax(120px, 1fr) 100px;
+}
+
+.scenario-card dt,
+.detail-list dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.scenario-card dd,
+.detail-list dd {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.action-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.helper-text {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.version-list {
+  display: grid;
+  gap: 8px;
+}
+
+.version-list a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.version-list a.selected {
+  border-color: rgba(40, 103, 168, 0.45);
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+.version-list span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .run-items {
@@ -554,7 +809,8 @@ textarea:focus {
 }
 
 @media (max-width: 1040px) {
-  .workspace {
+  .workspace,
+  .editor-layout {
     grid-template-columns: 1fr;
   }
 
@@ -570,7 +826,8 @@ textarea:focus {
 
   .topbar,
   .panel-head,
-  .toolbar {
+  .toolbar,
+  .list-toolbar {
     align-items: stretch;
     flex-direction: column;
   }
@@ -578,8 +835,31 @@ textarea:focus {
   .run-state,
   .toolbar label,
   .api-pill,
-  .run-button {
+  .run-button,
+  .list-toolbar label,
+  .list-toolbar a {
     width: 100%;
+  }
+
+  .topbar-actions,
+  .nav-actions,
+  .editor-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .action-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .nav-actions a {
+    width: 100%;
+  }
+
+  .scenario-card,
+  .scenario-card dl {
+    grid-template-columns: 1fr;
   }
 
   .sample-tabs {

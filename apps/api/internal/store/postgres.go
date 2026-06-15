@@ -395,7 +395,32 @@ func (p *Postgres) ListScenarioVersions(id string) []ScenarioVersionRecord {
 	return records
 }
 
-func (p *Postgres) CreateRun(scenarioID string, targetID string, sc scenario.Scenario) RunRecord {
+func (p *Postgres) GetScenarioVersion(id string, versionNumber int) (ScenarioVersionRecord, bool) {
+	ctx, cancel := storeContext()
+	defer cancel()
+
+	var record ScenarioVersionRecord
+	var raw []byte
+	err := p.db.QueryRowContext(ctx, `
+		SELECT id::text, scenario_id::text, version_number, definition, created_at
+		FROM scenario_versions
+		WHERE scenario_id = $1 AND version_number = $2
+	`, id, versionNumber).Scan(&record.ID, &record.ScenarioID, &record.VersionNumber, &raw, &record.CreatedAt)
+	if err != nil {
+		return ScenarioVersionRecord{}, false
+	}
+	if err := json.Unmarshal(raw, &record.Scenario); err != nil {
+		return ScenarioVersionRecord{}, false
+	}
+	return record, true
+}
+
+func (p *Postgres) CreateRun(
+	scenarioID string,
+	targetID string,
+	sc scenario.Scenario,
+	versionRef ...ScenarioVersionRecord,
+) RunRecord {
 	ctx, cancel := storeContext()
 	defer cancel()
 
@@ -408,10 +433,24 @@ func (p *Postgres) CreateRun(scenarioID string, targetID string, sc scenario.Sce
 	var targetParam any
 	var versionParam any
 	var versionNumber int
+
 	if targetID != "" {
 		targetParam = targetID
 	}
-	if scenarioID != "" {
+
+	if len(versionRef) > 0 {
+		resolvedScenarioID := scenarioID
+		if resolvedScenarioID == "" {
+			resolvedScenarioID = versionRef[0].ScenarioID
+		}
+
+		if resolvedScenarioID != "" {
+			scenarioParam = resolvedScenarioID
+		}
+
+		versionParam = versionRef[0].ID
+		versionNumber = versionRef[0].VersionNumber
+	} else if scenarioID != "" {
 		versionID, currentVersionNumber, ok := p.currentScenarioVersion(ctx, scenarioID)
 		if ok {
 			scenarioParam = scenarioID
@@ -424,13 +463,27 @@ func (p *Postgres) CreateRun(scenarioID string, targetID string, sc scenario.Sce
 	err = p.db.QueryRowContext(ctx, `
 		INSERT INTO runs (project_id, target_id, scenario_id, scenario_version_id, status, scenario_snapshot)
 		VALUES ($1, $2, $3, $4, 'queued', $5)
-		RETURNING id::text, COALESCE(target_id::text, ''), COALESCE(scenario_id::text, ''), COALESCE(scenario_version_id::text, ''), status::text, created_at
-	`, p.projectID, targetParam, scenarioParam, versionParam, raw).Scan(&record.ID, &record.TargetID, &record.ScenarioID, &record.ScenarioVersionID, &record.Status, &record.CreatedAt)
+		RETURNING id::text,
+			COALESCE(target_id::text, ''),
+			COALESCE(scenario_id::text, ''),
+			COALESCE(scenario_version_id::text, ''),
+			status::text,
+			created_at
+	`, p.projectID, targetParam, scenarioParam, versionParam, raw).Scan(
+		&record.ID,
+		&record.TargetID,
+		&record.ScenarioID,
+		&record.ScenarioVersionID,
+		&record.Status,
+		&record.CreatedAt,
+	)
 	if err != nil {
 		return RunRecord{}
 	}
+
 	record.Scenario = sc
 	record.ScenarioVersionNumber = versionNumber
+
 	p.AppendRunEvent(record.ID, runevent.Event{
 		Level:   runevent.LevelInfo,
 		Type:    runevent.TypeRunQueued,
@@ -443,6 +496,7 @@ func (p *Postgres) CreateRun(scenarioID string, targetID string, sc scenario.Sce
 			"target_id":               record.TargetID,
 		},
 	})
+
 	return record
 }
 
