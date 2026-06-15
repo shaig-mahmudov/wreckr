@@ -58,7 +58,7 @@ func TestPostgresStorePersistsScenariosRunsAndReports(t *testing.T) {
 		t.Fatalf("scenario count = %d, want 1", len(listed))
 	}
 
-	run := st.CreateRun(created.ID, sc)
+	run := st.CreateRun(created.ID, "", sc)
 	if run.ID == "" {
 		t.Fatal("created run ID is empty")
 	}
@@ -148,7 +148,7 @@ func TestPostgresStorePersistsScenariosRunsAndReports(t *testing.T) {
 		}
 	}
 
-	cancelRun := st.CreateRun(created.ID, sc)
+	cancelRun := st.CreateRun(created.ID, "", sc)
 	st.MarkRunStarted(cancelRun.ID)
 	cancelReport := report.Build(cancelRun.ID, sc.Name, time.Now().Add(-time.Second), []report.ResponseRecord{{
 		RequestName: "request",

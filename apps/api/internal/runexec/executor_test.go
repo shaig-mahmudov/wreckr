@@ -19,7 +19,7 @@ func TestExecutorCanResumeRunningRunOnRetry(t *testing.T) {
 	defer target.Close()
 
 	st := store.NewMemory()
-	run := st.CreateRun("", scenario.Scenario{
+	run := st.CreateRun("", "", scenario.Scenario{
 		Version: 1,
 		Name:    "retry-resume",
 		Target:  scenario.Target{BaseURL: target.URL},
