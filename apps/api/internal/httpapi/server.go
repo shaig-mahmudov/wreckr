@@ -51,6 +51,11 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /metrics", s.metrics)
+	mux.HandleFunc("GET /v1/targets", s.listTargets)
+	mux.HandleFunc("POST /v1/targets", s.createTarget)
+	mux.HandleFunc("GET /v1/targets/{id}", s.getTarget)
+	mux.HandleFunc("PUT /v1/targets/{id}", s.updateTarget)
+	mux.HandleFunc("DELETE /v1/targets/{id}", s.deleteTarget)
 	mux.HandleFunc("GET /v1/scenarios", s.listScenarios)
 	mux.HandleFunc("POST /v1/scenarios", s.createScenario)
 	mux.HandleFunc("PUT /v1/scenarios/", s.updateScenario)
@@ -99,9 +104,90 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, "wreckr_runs_canceled_total %d\n", canceled)
 }
 
+type targetRequest struct {
+	Name        string                  `json:"name"`
+	BaseURL     string                  `json:"baseUrl"`
+	Environment store.TargetEnvironment `json:"environment"`
+	Description string                  `json:"description,omitempty"`
+	Headers     map[string]string       `json:"headers,omitempty"`
+}
+
+func (s *Server) createTarget(w http.ResponseWriter, r *http.Request) {
+	target, ok := s.readTargetRequest(w, r)
+	if !ok {
+		return
+	}
+	record := s.store.CreateTarget(target)
+	writeJSON(w, http.StatusCreated, record)
+}
+
+func (s *Server) listTargets(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"targets": s.store.ListTargets()})
+}
+
+func (s *Server) getTarget(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	record, ok := s.store.GetTarget(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("target %q not found", id))
+		return
+	}
+	writeJSON(w, http.StatusOK, record)
+}
+
+func (s *Server) updateTarget(w http.ResponseWriter, r *http.Request) {
+	target, ok := s.readTargetRequest(w, r)
+	if !ok {
+		return
+	}
+	record, ok := s.store.UpdateTarget(r.PathValue("id"), target)
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("target %q not found", r.PathValue("id")))
+		return
+	}
+	writeJSON(w, http.StatusOK, record)
+}
+
+func (s *Server) deleteTarget(w http.ResponseWriter, r *http.Request) {
+	if !s.store.DeleteTarget(r.PathValue("id")) {
+		writeError(w, http.StatusNotFound, fmt.Errorf("target %q not found", r.PathValue("id")))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) readTargetRequest(w http.ResponseWriter, r *http.Request) (store.TargetRecord, bool) {
+	var req targetRequest
+	if err := readJSON(w, r, s.cfg.MaxBodyBytes, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return store.TargetRecord{}, false
+	}
+	target := store.TargetRecord{
+		Name:        strings.TrimSpace(req.Name),
+		BaseURL:     strings.TrimSpace(req.BaseURL),
+		Environment: req.Environment,
+		Description: strings.TrimSpace(req.Description),
+		Headers:     req.Headers,
+	}
+	if target.Environment == "" {
+		target.Environment = store.TargetDevelopment
+	}
+	if err := validateTargetRecord(target, s.cfg.Guardrails); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return store.TargetRecord{}, false
+	}
+	return target, true
+}
+
 func (s *Server) createScenario(w http.ResponseWriter, r *http.Request) {
 	var sc scenario.Scenario
 	if err := readJSON(w, r, s.cfg.MaxBodyBytes, &sc); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	var err error
+	sc, _, err = s.resolveScenarioTarget(sc, "")
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -154,6 +240,12 @@ func (s *Server) updateScenario(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	var err error
+	sc, _, err = s.resolveScenarioTarget(sc, "")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	sc = sc.WithEnv().Normalized()
 	if err := sc.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -174,6 +266,7 @@ func (s *Server) updateScenario(w http.ResponseWriter, r *http.Request) {
 
 type createRunRequest struct {
 	ScenarioID string             `json:"scenario_id,omitempty"`
+	TargetID   string             `json:"target_id,omitempty"`
 	Scenario   *scenario.Scenario `json:"scenario,omitempty"`
 	Sync       bool               `json:"sync,omitempty"`
 }
@@ -187,6 +280,7 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 
 	var sc scenario.Scenario
 	scenarioID := req.ScenarioID
+	targetID := strings.TrimSpace(req.TargetID)
 	if req.Scenario != nil {
 		sc = *req.Scenario
 	} else if req.ScenarioID != "" {
@@ -201,6 +295,12 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var err error
+	sc, targetID, err = s.resolveScenarioTarget(sc, targetID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	sc = sc.WithEnv().Normalized()
 	if err := sc.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -212,7 +312,7 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 	}
 	sc = s.applyRunGuardrails(sc)
 
-	runRecord := s.store.CreateRun(scenarioID, sc)
+	runRecord := s.store.CreateRun(scenarioID, targetID, sc)
 	if s.queue != nil {
 		if err := s.queue.EnqueueRun(r.Context(), runRecord.ID); err != nil {
 			s.store.ErrorRun(runRecord.ID, fmt.Errorf("enqueue run: %w", err))
@@ -384,6 +484,63 @@ func (s *Server) applyRunGuardrails(sc scenario.Scenario) scenario.Scenario {
 	return sc
 }
 
+func (s *Server) resolveScenarioTarget(sc scenario.Scenario, explicitTargetID string) (scenario.Scenario, string, error) {
+	targetID := strings.TrimSpace(explicitTargetID)
+	if targetID == "" {
+		targetID = strings.TrimSpace(sc.Target.ID)
+	}
+	if targetID == "" {
+		return sc, "", nil
+	}
+	target, ok := s.store.GetTarget(targetID)
+	if !ok {
+		return scenario.Scenario{}, "", fmt.Errorf("target %q not found", targetID)
+	}
+	sc.Target.ID = target.ID
+	sc.Target.BaseURL = target.BaseURL
+	sc.Target.Headers = mergeHeaders(target.Headers, sc.Target.Headers)
+	return sc, target.ID, nil
+}
+
+func validateTargetRecord(target store.TargetRecord, cfg config.Guardrails) error {
+	var problems []string
+	if target.Name == "" {
+		problems = append(problems, "name is required")
+	}
+	switch target.Environment {
+	case store.TargetLocal, store.TargetDevelopment, store.TargetStaging, store.TargetProduction:
+	default:
+		problems = append(problems, "environment must be one of local, development, staging, production")
+	}
+	if err := guardrails.ValidateTargetBaseURL(target.BaseURL, cfg); err != nil {
+		problems = append(problems, err.Error())
+	}
+	for key := range target.Headers {
+		if strings.TrimSpace(key) == "" {
+			problems = append(problems, "header names must not be empty")
+			break
+		}
+	}
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+func mergeHeaders(targetHeaders map[string]string, scenarioHeaders map[string]string) map[string]string {
+	if len(targetHeaders) == 0 && len(scenarioHeaders) == 0 {
+		return map[string]string{}
+	}
+	merged := make(map[string]string, len(targetHeaders)+len(scenarioHeaders))
+	for key, value := range targetHeaders {
+		merged[key] = value
+	}
+	for key, value := range scenarioHeaders {
+		merged[key] = value
+	}
+	return merged
+}
+
 func (s *Server) registerRunCancel(id string, cancel context.CancelFunc) {
 	s.cancelMu.Lock()
 	defer s.cancelMu.Unlock()
@@ -511,7 +668,7 @@ func withJSON(next http.Handler) http.Handler {
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
