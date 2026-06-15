@@ -47,6 +47,123 @@ func TestScenarioCreateAndListEndpoints(t *testing.T) {
 	}
 }
 
+func TestTargetCRUDEndpoints(t *testing.T) {
+	targetServer := newTargetServer(t)
+	api := newAPIServer(t)
+
+	createPayload := map[string]any{
+		"name":        "Local Demo API",
+		"baseUrl":     targetServer.URL,
+		"environment": "local",
+		"description": "Demo target for local runs",
+		"headers": map[string]string{
+			"X-Wreckr-Target": "local-demo",
+		},
+	}
+	created := postJSON[store.TargetRecord](t, api.URL+"/v1/targets", createPayload, http.StatusCreated)
+	if created.ID == "" {
+		t.Fatal("created target ID is empty")
+	}
+	if created.BaseURL != targetServer.URL {
+		t.Fatalf("created target baseUrl = %q, want %q", created.BaseURL, targetServer.URL)
+	}
+	if created.Environment != store.TargetLocal {
+		t.Fatalf("created target environment = %q, want %q", created.Environment, store.TargetLocal)
+	}
+	if created.Headers["X-Wreckr-Target"] != "local-demo" {
+		t.Fatalf("created target headers = %#v, want X-Wreckr-Target", created.Headers)
+	}
+
+	listed := getJSON[struct {
+		Targets []store.TargetRecord `json:"targets"`
+	}](t, api.URL+"/v1/targets", http.StatusOK)
+	if len(listed.Targets) != 1 {
+		t.Fatalf("listed target count = %d, want 1", len(listed.Targets))
+	}
+	if listed.Targets[0].ID != created.ID {
+		t.Fatalf("listed target ID = %q, want %q", listed.Targets[0].ID, created.ID)
+	}
+
+	got := getJSON[store.TargetRecord](t, api.URL+"/v1/targets/"+created.ID, http.StatusOK)
+	if got.Name != "Local Demo API" {
+		t.Fatalf("target name = %q, want Local Demo API", got.Name)
+	}
+
+	updatePayload := map[string]any{
+		"name":        "Staging Demo API",
+		"baseUrl":     targetServer.URL,
+		"environment": "staging",
+		"description": "Updated target",
+	}
+	updated := putJSON[store.TargetRecord](t, api.URL+"/v1/targets/"+created.ID, updatePayload, http.StatusOK)
+	if updated.Name != "Staging Demo API" {
+		t.Fatalf("updated target name = %q, want Staging Demo API", updated.Name)
+	}
+	if updated.Environment != store.TargetStaging {
+		t.Fatalf("updated target environment = %q, want %q", updated.Environment, store.TargetStaging)
+	}
+
+	deleteRaw(t, api.URL+"/v1/targets/"+created.ID, http.StatusNoContent)
+	assertErrorResponse(t, getRaw(t, api.URL+"/v1/targets/"+created.ID, http.StatusNotFound))
+}
+
+func TestRunCreationResolvesExplicitTarget(t *testing.T) {
+	var sawTargetHeader bool
+	var sawScenarioHeader bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Wreckr-Target") == "target-header" {
+			sawTargetHeader = true
+		}
+		if r.Header.Get("X-Wreckr-Custom-Scenario") == "scenario-header" {
+			sawScenarioHeader = true
+		}
+		switch r.URL.Path {
+		case "/setup", "/work", "/teardown":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer target.Close()
+
+	api := newAPIServer(t)
+	createdTarget := postJSON[store.TargetRecord](t, api.URL+"/v1/targets", map[string]any{
+		"name":        "Resolved Target",
+		"baseUrl":     target.URL,
+		"environment": "development",
+		"headers": map[string]string{
+			"X-Wreckr-Target": "target-header",
+		},
+	}, http.StatusCreated)
+
+	sc := testScenario("http://example.invalid")
+	sc.Target.Headers = map[string]string{
+		"X-Wreckr-Custom-Scenario": "scenario-header",
+	}
+	run := postJSON[store.RunRecord](t, api.URL+"/v1/runs", map[string]any{
+		"scenario":  sc,
+		"target_id": createdTarget.ID,
+		"sync":      true,
+	}, http.StatusCreated)
+
+	if run.Status != store.RunPassed {
+		t.Fatalf("run status = %s, want %s", run.Status, store.RunPassed)
+	}
+	if run.TargetID != createdTarget.ID {
+		t.Fatalf("run target_id = %q, want %q", run.TargetID, createdTarget.ID)
+	}
+	if run.Scenario.Target.BaseURL != target.URL {
+		t.Fatalf("run target base URL = %q, want %q", run.Scenario.Target.BaseURL, target.URL)
+	}
+	if !sawTargetHeader {
+		t.Fatal("target header was not sent to resolved target")
+	}
+	if !sawScenarioHeader {
+		t.Fatal("scenario header was not sent to resolved target")
+	}
+}
+
 func TestRunCreateStatusAndReportEndpoints(t *testing.T) {
 	target := newTargetServer(t)
 	api := newAPIServer(t)
@@ -735,6 +852,20 @@ func getJSON[T any](t *testing.T, url string, wantStatus int) T {
 func getRaw(t *testing.T, url string, wantStatus int) []byte {
 	t.Helper()
 	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	return readResponse(t, resp, wantStatus)
+}
+
+func deleteRaw(t *testing.T, url string, wantStatus int) []byte {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
