@@ -242,7 +242,27 @@ func (p *Postgres) ListScenarioVersions(id string) []ScenarioVersionRecord {
 	return records
 }
 
-func (p *Postgres) CreateRun(scenarioID string, sc scenario.Scenario) RunRecord {
+func (p *Postgres) GetScenarioVersion(id string, versionNumber int) (ScenarioVersionRecord, bool) {
+	ctx, cancel := storeContext()
+	defer cancel()
+
+	var record ScenarioVersionRecord
+	var raw []byte
+	err := p.db.QueryRowContext(ctx, `
+		SELECT id::text, scenario_id::text, version_number, definition, created_at
+		FROM scenario_versions
+		WHERE scenario_id = $1 AND version_number = $2
+	`, id, versionNumber).Scan(&record.ID, &record.ScenarioID, &record.VersionNumber, &raw, &record.CreatedAt)
+	if err != nil {
+		return ScenarioVersionRecord{}, false
+	}
+	if err := json.Unmarshal(raw, &record.Scenario); err != nil {
+		return ScenarioVersionRecord{}, false
+	}
+	return record, true
+}
+
+func (p *Postgres) CreateRun(scenarioID string, sc scenario.Scenario, versionRef ...ScenarioVersionRecord) RunRecord {
 	ctx, cancel := storeContext()
 	defer cancel()
 
@@ -254,7 +274,11 @@ func (p *Postgres) CreateRun(scenarioID string, sc scenario.Scenario) RunRecord 
 	var scenarioParam any
 	var versionParam any
 	var versionNumber int
-	if scenarioID != "" {
+	if len(versionRef) > 0 {
+		scenarioParam = scenarioID
+		versionParam = versionRef[0].ID
+		versionNumber = versionRef[0].VersionNumber
+	} else if scenarioID != "" {
 		versionID, currentVersionNumber, ok := p.currentScenarioVersion(ctx, scenarioID)
 		if ok {
 			scenarioParam = scenarioID

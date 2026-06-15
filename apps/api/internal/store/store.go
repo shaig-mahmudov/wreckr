@@ -12,8 +12,9 @@ type Store interface {
 	GetScenario(id string) (ScenarioRecord, bool)
 	ListScenarios() []ScenarioRecord
 	ListScenarioVersions(id string) []ScenarioVersionRecord
+	GetScenarioVersion(id string, versionNumber int) (ScenarioVersionRecord, bool)
 
-	CreateRun(scenarioID string, sc scenario.Scenario) RunRecord
+	CreateRun(scenarioID string, sc scenario.Scenario, versionRef ...ScenarioVersionRecord) RunRecord
 	MarkRunStarted(id string)
 	CompleteRun(id string, rep report.Report)
 	CancelRun(id string, rep report.Report)
