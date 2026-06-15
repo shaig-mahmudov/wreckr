@@ -9,7 +9,9 @@ WRECKR_STORE=memory
 WRECKR_STORE=postgres
 ```
 
-When `WRECKR_STORE=postgres`, the API uses `DATABASE_URL` and persists scenarios, immutable scenario versions, runs, reports, and run state.
+When `WRECKR_STORE=postgres`, the API uses `DATABASE_URL` and persists targets, scenarios, immutable scenario versions, runs, run events, reports, and run state.
+
+API-created runs are queued through Redis/Asynq and executed by the worker. In a multi-process setup, the API and worker must use the same PostgreSQL database so the worker can reload queued run snapshots and persist final reports.
 
 ## Migration Tool
 
@@ -70,7 +72,9 @@ The initial schema includes:
 
 Scenario versioning is modeled explicitly with immutable `scenario_versions` rows and a nullable `scenarios.current_version_id` pointer.
 
-Runs store both `scenario_id` and `scenario_version_id`, plus a JSON scenario snapshot, so old reports continue to show the exact scenario version that executed even after the scenario is edited.
+Targets are modeled in `targets` and can be linked to runs through `runs.target_id`. When a run is created with a target ID, the API resolves the target base URL and merges target headers into the scenario snapshot before queuing execution.
+
+Runs store `target_id`, `scenario_id`, and `scenario_version_id`, plus a JSON scenario snapshot, so old reports continue to show the exact target-resolved scenario version that executed even after the scenario or target is edited.
 
 Run events are stored in `run_events` with a per-run sequence number, event level, event type, message, structured JSON metadata, and timestamp. The API returns them in chronological sequence through `GET /v1/runs/{id}/events` and streams them live through `GET /v1/runs/{id}/events/stream`.
 

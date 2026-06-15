@@ -1,10 +1,17 @@
 # Wreckr Project Status
 
-Last updated: 2026-06-12
+Last updated: 2026-06-15
 
 ## Current State
 
-Wreckr is now a working MVP for language-agnostic backend scenario testing. It can define scenarios, run black-box HTTP traffic against a target, validate technical thresholds and business invariants, persist run history, and report production-style failures.
+Wreckr is a working MVP for language-agnostic backend scenario testing. It can define black-box HTTP scenarios, run production-style traffic against a target, validate technical thresholds and business invariants, persist run history, and report failures through both an API and a dashboard.
+
+The current execution model has two paths:
+
+- CLI runs execute in-process from a local scenario file.
+- API-created runs are persisted as `queued`, enqueued to Redis with Asynq, and executed by the worker process.
+
+The Docker Compose stack is the most complete local environment. It starts the API, worker, dashboard, demo API, PostgreSQL, Redis, migrations, and Prometheus.
 
 ## Implemented
 
@@ -19,9 +26,12 @@ Wreckr is now a working MVP for language-agnostic backend scenario testing. It c
   - p95 latency
 - Request-rate pacing with `traffic.rate_per_second`.
 - Context timeout handling for safe run shutdown.
-- Run cancellation through `POST /v1/runs/{id}/cancel`.
+- Run cancellation for in-process API runs and queued worker runs before execution.
 - Partial canceled reports saved after cancellation.
-- Scenario create, update, list, version list, run create, run status, report, event timeline, and live event stream endpoints.
+- Scenario create, update, get, list, and version list endpoints.
+- Target create, update, get, list, and delete endpoints.
+- Run create, list, status, report, event timeline, live event stream, and cancellation endpoints.
+- Target resolution through `target_id`, including target-level headers merged with scenario headers.
 - Persistent run event timelines for lifecycle, hook, request, assertion, threshold, invariant, cancellation, and terminal-state events.
 - Server-Sent Events stream for live run progress.
 - Redis + Asynq orchestration for API-created runs.
@@ -35,9 +45,11 @@ Wreckr is now a working MVP for language-agnostic backend scenario testing. It c
   - maximum run duration
   - maximum request body size
   - target allowlist
+  - metadata-service target blocking by default
   - unsafe target URL rejection
 - Prometheus-style API metrics at `/metrics`.
-- Next.js dashboard that connects to the API, launches sample scenarios, lists runs, and displays report details.
+- Next.js dashboard that connects to the API, edits sample scenario JSON, selects targets for runs, launches runs, lists runs, displays report metrics, shows failures, opens a live event timeline, and renders raw run/report JSON.
+- Dashboard target management UI for creating, editing, listing, and deleting configured targets.
 - GitHub Actions CI for backend tests, backend vet, frontend build, and Docker Compose config validation.
 - Docker Compose stack for API, worker, dashboard, demo API, PostgreSQL, Redis, migrations, and Prometheus.
 
@@ -46,7 +58,7 @@ Wreckr is now a working MVP for language-agnostic backend scenario testing. It c
 The API can run with either storage backend:
 
 - `WRECKR_STORE=memory` for local ephemeral testing.
-- `WRECKR_STORE=postgres` for persistent scenario, run, report, and scenario-version history.
+- `WRECKR_STORE=postgres` for persistent target, scenario, run, report, event, and scenario-version history.
 
 PostgreSQL integration tests are opt-in through `WRECKR_TEST_DATABASE_URL`.
 
@@ -54,6 +66,11 @@ PostgreSQL integration tests are opt-in through `WRECKR_TEST_DATABASE_URL`.
 
 - `GET /healthz`
 - `GET /metrics`
+- `GET /v1/targets`
+- `POST /v1/targets`
+- `GET /v1/targets/{id}`
+- `PUT /v1/targets/{id}`
+- `DELETE /v1/targets/{id}`
 - `GET /v1/scenarios`
 - `POST /v1/scenarios`
 - `PUT /v1/scenarios/{id}`
@@ -66,6 +83,14 @@ PostgreSQL integration tests are opt-in through `WRECKR_TEST_DATABASE_URL`.
 - `GET /v1/runs/{id}/events`
 - `GET /v1/runs/{id}/events/stream`
 - `POST /v1/runs/{id}/cancel`
+
+## Operational Notes
+
+- `cmd/api` always wires an Asynq enqueuer. A bare API process can serve health, metrics, and CRUD endpoints, but API run creation requires Redis to accept the enqueue.
+- Worker execution requires access to the same storage backend as the API. In the Compose stack this is PostgreSQL.
+- Memory storage is useful for local API experiments, but queued API runs are only practical when the API and worker share persistent storage.
+- The CLI path does not use targets, scenario versions, storage, Redis, or the worker. It loads one scenario file and prints a text or JSON report.
+- Target records use the API field name `baseUrl`; scenario JSON continues to use `target.base_url`.
 
 ## Verification
 
@@ -85,25 +110,32 @@ The repository currently has automated coverage for:
 - Live run event streaming.
 - Guardrail enforcement.
 - Request-rate pacing.
+- Worker execution of queued runs.
+- Target CRUD endpoints.
+- Target resolution for API-created runs with `target_id`.
+
+Coverage gaps:
+
+- Dashboard target management and live timeline behavior are not covered by browser or component tests yet.
+- Distributed cancellation of a worker-owned running job is not covered because the feature is not implemented yet.
 
 ## Main Gaps
 
-- CLI execution is still in-process by design.
-- Worker-owned running jobs do not yet support distributed cancellation.
-- Async orchestration does not yet expose dead-letter/retry dashboards.
+- Worker-owned running jobs do not yet support distributed cancellation from the API.
+- Async orchestration does not yet expose retry/dead-letter dashboards or persisted retry visibility.
 - Run event streaming uses SSE today; WebSocket support is not implemented.
 - k6 script generation is not implemented yet.
 - Object storage and report artifact retention are not implemented yet.
 - OpenTelemetry tracing is not implemented yet.
-- Dashboard does not yet include a full scenario editor, live event stream, artifact viewer, or project/target management.
+- Dashboard does not yet include persisted scenario editing, artifact/log viewing, project management, richer invariant analysis, or retry/dead-letter visibility.
 - Non-HTTP protocols such as gRPC, WebSocket, NATS, Kafka, and queue replay are still planned.
 - Secrets management, redaction, quotas, audit logs, and production-target warning labels are still planned.
 
 ## Recommended Next Milestones
 
-1. Add Redis + Asynq worker orchestration so API requests enqueue runs instead of executing them in-process.
+1. Add distributed cancellation for worker-owned running jobs.
 2. Add worker retry/dead-letter visibility into the persisted timeline and dashboard.
-3. Add a scenario editor and target management to the dashboard.
+3. Add persisted scenario editing to the dashboard.
 4. Add object storage for raw reports, logs, generated scripts, and artifacts.
 5. Add OpenTelemetry traces and richer Prometheus metrics.
 6. Add k6 compilation for higher-scale HTTP workloads.

@@ -40,11 +40,14 @@ Implemented:
   - `wreckr run <scenario.json>`
 - HTTP API:
   - health check
+  - Prometheus-style metrics
+  - target create/update/get/list/delete
   - create scenario
   - update scenario
   - list scenarios
   - list scenario versions
   - start run
+  - run target override with `target_id`
   - inspect run/report
   - inspect run event timeline
   - stream live run events with SSE
@@ -64,8 +67,13 @@ Implemented:
 - Next.js dashboard:
   - API health connection
   - sample scenario launcher
+  - sample scenario JSON editor
+  - target selector
+  - target management
   - run list
+  - live event timeline
   - report view
+  - raw run/report JSON view
 - GitHub Actions CI for Go tests, Go vet, frontend build, and Docker Compose config validation.
 - Redis + Asynq worker orchestration for API-created runs.
 - Demo target API with broken idempotency.
@@ -86,6 +94,7 @@ Implemented core tables:
 
 Implemented behavior:
 
+- target CRUD in memory and PostgreSQL stores
 - immutable scenario versions
 - run snapshots contain the exact scenario used
 - cancellation and timeout state transitions are explicit
@@ -96,6 +105,7 @@ Implemented behavior:
 
 Still planned:
 
+- project CRUD beyond the seeded/default project model
 - normalized run metrics tables
 - normalized threshold and invariant result tables
 - artifact metadata and object storage integration
@@ -120,10 +130,13 @@ Current worker responsibilities:
 - launch runner
 - finalize report
 
+Operational note:
+
+- The production `cmd/api` entrypoint always enqueues API-created runs through Redis/Asynq. Local in-process API execution exists in the server package for tests and embedded use, but the normal API plus worker path requires Redis and shared storage.
+
 Still planned:
 
 - dedicated cancellation task for running worker-owned jobs
-- run event streaming
 - artifact collection
 - richer retry/dead-letter visibility
 - worker metrics
@@ -186,18 +199,18 @@ Live monitoring follow-up:
 
 ## Phase 6: Frontend Dashboard
 
-Status: partially implemented. The dashboard builds, connects to the API, launches sample scenarios, lists runs, and displays report details.
+Status: partially implemented. The dashboard builds, connects to the API, edits sample scenario JSON, selects a target for a run, launches runs, lists runs, displays report details, shows failures, renders raw run/report JSON, and displays a live event timeline through SSE. It also includes a target management UI.
 
 Planned dashboard flows:
 
-- project/target setup
-- scenario editor
+- project setup
+- persisted scenario editor
 - run launcher
 - richer live run status
 - richer report view
-- live event timeline view
 - invariant failure analysis
 - artifact/log viewer
+- worker retry/dead-letter visibility
 
 The dashboard should feel like an operational tool: dense, calm, and built for repeated use.
 
