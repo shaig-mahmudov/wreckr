@@ -279,6 +279,9 @@ func (m *Memory) MarkRunStarted(id string) {
 	if !ok {
 		return
 	}
+	if isTerminalRunStatus(record.Status) {
+		return
+	}
 	now := time.Now().UTC()
 	record.Status = RunRunning
 	record.StartedAt = &now
@@ -295,6 +298,9 @@ func (m *Memory) CompleteRun(id string, rep report.Report) {
 	defer m.mu.Unlock()
 	record, ok := m.runs[id]
 	if !ok {
+		return
+	}
+	if isTerminalRunStatus(record.Status) {
 		return
 	}
 	now := time.Now().UTC()
@@ -336,6 +342,9 @@ func (m *Memory) CancelRun(id string, rep report.Report) {
 	if !ok {
 		return
 	}
+	if isTerminalRunStatus(record.Status) {
+		return
+	}
 	now := time.Now().UTC()
 	rep.Status = report.StatusCanceled
 	rep.ScenarioVersionID = record.ScenarioVersionID
@@ -360,6 +369,9 @@ func (m *Memory) ErrorRun(id string, err error) {
 	defer m.mu.Unlock()
 	record, ok := m.runs[id]
 	if !ok {
+		return
+	}
+	if isTerminalRunStatus(record.Status) {
 		return
 	}
 	now := time.Now().UTC()
@@ -389,6 +401,33 @@ func (m *Memory) ListRuns() []RunRecord {
 		out = append(out, record)
 	}
 	return out
+}
+
+func (m *Memory) RequestRunCancel(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	record, ok := m.runs[id]
+	if !ok || !isCancelableRunStatus(record.Status) {
+		return false
+	}
+	if m.isRunCancelRequestedLocked(id) {
+		return true
+	}
+	m.appendRunEventLocked(id, runevent.Event{
+		Level:   runevent.LevelWarn,
+		Type:    runevent.TypeCancelRequested,
+		Message: "run cancellation requested",
+		Metadata: map[string]any{
+			"status": string(record.Status),
+		},
+	})
+	return true
+}
+
+func (m *Memory) IsRunCancelRequested(id string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.isRunCancelRequestedLocked(id)
 }
 
 func (m *Memory) AppendRunEvent(runID string, event runevent.Event) runevent.Event {
@@ -423,4 +462,26 @@ func (m *Memory) appendRunEventLocked(runID string, event runevent.Event) runeve
 	event.Sequence = int64(len(m.runEvents[runID]) + 1)
 	m.runEvents[runID] = append(m.runEvents[runID], event)
 	return event
+}
+
+func isCancelableRunStatus(status RunStatus) bool {
+	return status == RunQueued || status == RunRunning
+}
+
+func isTerminalRunStatus(status RunStatus) bool {
+	switch status {
+	case RunPassed, RunFailed, RunErrored, RunCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Memory) isRunCancelRequestedLocked(runID string) bool {
+	for _, event := range m.runEvents[runID] {
+		if event.Type == runevent.TypeCancelRequested {
+			return true
+		}
+	}
+	return false
 }

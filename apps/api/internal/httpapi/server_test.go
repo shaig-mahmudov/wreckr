@@ -358,6 +358,41 @@ func TestRunCreationWithQueueEnqueuesWithoutInProcessExecution(t *testing.T) {
 	assertErrorResponse(t, getRaw(t, api.URL+"/v1/runs/"+run.ID+"/report", http.StatusConflict))
 }
 
+func TestCancelWorkerOwnedRunningRunRecordsDurableRequest(t *testing.T) {
+	target := newTargetServer(t)
+	queue := &fakeRunQueue{}
+	st := store.NewMemory()
+	api := newAPIServerWithStoreAndQueue(t, testConfig(config.Guardrails{
+		MaxConcurrency:      1000,
+		MaxRequestRate:      5000,
+		MaxRunDuration:      5 * time.Second,
+		MaxRequestBodyBytes: 1 << 20,
+	}), st, queue)
+
+	run := postJSON[store.RunRecord](t, api.URL+"/v1/runs", map[string]any{
+		"scenario": testScenario(target.URL),
+	}, http.StatusAccepted)
+	st.MarkRunStarted(run.ID)
+
+	canceled := postJSON[struct {
+		ID     string          `json:"id"`
+		Status store.RunStatus `json:"status"`
+	}](t, api.URL+"/v1/runs/"+run.ID+"/cancel", map[string]any{}, http.StatusAccepted)
+	if canceled.ID != run.ID {
+		t.Fatalf("cancel response ID = %q, want %q", canceled.ID, run.ID)
+	}
+	if canceled.Status != store.RunCanceled {
+		t.Fatalf("cancel response status = %s, want %s", canceled.Status, store.RunCanceled)
+	}
+	if !st.IsRunCancelRequested(run.ID) {
+		t.Fatal("cancel request was not persisted for worker-owned run")
+	}
+	status := getJSON[store.RunRecord](t, api.URL+"/v1/runs/"+run.ID, http.StatusOK)
+	if status.Status != store.RunRunning {
+		t.Fatalf("run status = %s, want worker-owned run to remain running until worker observes cancellation", status.Status)
+	}
+}
+
 func TestScenarioUpdateCreatesVersionWithoutMutatingOldRunReport(t *testing.T) {
 	target := newTargetServer(t)
 	api := newAPIServer(t)
@@ -731,19 +766,24 @@ func newAPIServerWithConfig(t *testing.T, cfg config.Config) *httptest.Server {
 
 func newAPIServerWithConfigAndQueue(t *testing.T, cfg config.Config, queue fakeQueue) *httptest.Server {
 	t.Helper()
+	return newAPIServerWithStoreAndQueue(t, cfg, store.NewMemory(), queue)
+}
+
+func newAPIServerWithStoreAndQueue(t *testing.T, cfg config.Config, st store.Store, queue fakeQueue) *httptest.Server {
+	t.Helper()
 	srv := httpapi.New(config.Config{
 		Addr:         cfg.Addr,
 		RunTimeout:   cfg.RunTimeout,
 		MaxBodyBytes: cfg.MaxBodyBytes,
 		Guardrails:   cfg.Guardrails,
-	}, store.NewMemory(), runner.New())
+	}, st, runner.New())
 	if queue != nil {
 		srv = httpapi.NewWithQueue(config.Config{
 			Addr:         cfg.Addr,
 			RunTimeout:   cfg.RunTimeout,
 			MaxBodyBytes: cfg.MaxBodyBytes,
 			Guardrails:   cfg.Guardrails,
-		}, store.NewMemory(), runner.New(), queue)
+		}, st, runner.New(), queue)
 	}
 
 	api := httptest.NewServer(srv.Handler())

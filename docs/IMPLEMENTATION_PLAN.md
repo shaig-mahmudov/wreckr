@@ -122,12 +122,16 @@ Implemented:
 - API-created runs are persisted as `queued` and enqueued instead of executing in the API process.
 - Separate `cmd/worker` entrypoint consumes queued run jobs.
 - Worker reloads the run snapshot from the store, executes the existing runner, and persists status/report transitions.
+- Durable cancellation requests stored in the run event timeline.
+- Worker-owned running jobs observe cancellation requests and finalize as `canceled`.
+- Terminal-state protection prevents late worker completion/error paths from overwriting canceled runs.
 - Docker Compose starts API, worker, Redis, Postgres, and migrations together.
 
 Current worker responsibilities:
 
 - load queued run
 - launch runner
+- poll for durable cancellation requests
 - finalize report
 
 Operational note:
@@ -136,7 +140,6 @@ Operational note:
 
 Still planned:
 
-- dedicated cancellation task for running worker-owned jobs
 - artifact collection
 - richer retry/dead-letter visibility
 - worker metrics

@@ -1,6 +1,6 @@
 # Wreckr Phase Tickets
 
-Last updated: 2026-06-15
+Last updated: 2026-06-16
 
 These tickets translate the implementation phases into issue-ready work items. Each ticket can be copied into GitHub Issues, Linear, Jira, or kept as the local planning backlog.
 
@@ -19,6 +19,19 @@ Scope:
 - Keep the CLI `wreckr run <scenario.json>` path working independently of the API and worker.
 - Keep the demo API useful for idempotency and rate-limit scenarios.
 - Keep CI green for Go tests, Go vet, frontend build, and Compose config validation.
+
+Out of Scope:
+
+- New protocol adapters.
+- k6 execution.
+- Production secrets, quotas, and audit logs.
+- Major dashboard redesigns.
+
+Limits:
+
+- Keep this ticket limited to regression prevention and small stabilization fixes.
+- Do not introduce new infrastructure dependencies.
+- Every change must preserve the CLI local-file workflow.
 
 Acceptance criteria:
 
@@ -56,6 +69,19 @@ Scope:
 - Keep scenario versioning immutable and linked to historical runs.
 - Ensure target-resolved scenario snapshots remain stable after target edits.
 
+Out of Scope:
+
+- Worker retry/dead-letter orchestration.
+- k6 artifact generation.
+- Dashboard artifact viewers.
+- Non-PostgreSQL durable stores.
+
+Limits:
+
+- Keep schema changes backward-migratable through SQL migrations.
+- Do not remove or weaken the memory store used by tests and local experiments.
+- Keep historical run snapshots immutable after creation.
+
 Acceptance criteria:
 
 - API and worker can operate against the same PostgreSQL schema without relying on in-memory state.
@@ -90,6 +116,20 @@ Scope:
 - Ensure worker shutdown and timeout behavior preserve clear terminal run states.
 - Document local and production run execution topology.
 
+Out of Scope:
+
+- k6 execution backends.
+- Kubernetes job orchestration.
+- Dashboard redesign beyond exposing retry/cancel state.
+- Full observability tracing.
+
+Limits:
+
+- Keep orchestration scoped to Redis/Asynq.
+- Do not require callers to know which worker owns a run.
+- Preserve existing synchronous test/embedded server behavior.
+- Terminal run states must remain single and explicit: passed, failed, errored, or canceled.
+
 Acceptance criteria:
 
 - A running worker-owned job can be canceled from `POST /v1/runs/{id}/cancel`.
@@ -106,6 +146,7 @@ Dependencies:
 Notes:
 
 - Current API run creation already enqueues `runs.execute` jobs through Asynq.
+- Durable cancellation requests and worker-owned running cancellation are implemented; retry/dead-letter visibility and worker metrics remain open.
 
 ## WRK-P4: Add k6 Compiler
 
@@ -124,6 +165,20 @@ Scope:
 - Collect k6 JSON summaries, logs, and exit status.
 - Normalize k6 results back into Wreckr report structures.
 - Store generated scripts and raw summaries as artifacts once artifact storage exists.
+
+Out of Scope:
+
+- Replacing the Go runner.
+- Kubernetes-native execution.
+- Non-HTTP protocols.
+- Full artifact retention policy implementation.
+
+Limits:
+
+- Compiler output must be deterministic for the same scenario input.
+- Initial support is HTTP only.
+- Generated scripts must remain inspectable before execution.
+- Reports must normalize back into the existing Wreckr report shape.
 
 Acceptance criteria:
 
@@ -161,6 +216,19 @@ Scope:
 - Add invariant, request, error, and latency metrics.
 - Add optional target correlation through trace IDs, PromQL checks, or scrape metadata.
 
+Out of Scope:
+
+- Full dashboard analytics.
+- External hosted observability service setup.
+- Protocol-specific metrics for future adapters.
+- Business-level SLO management.
+
+Limits:
+
+- Use standard OpenTelemetry and Prometheus conventions.
+- Metrics must keep stable names once documented.
+- Avoid high-cardinality labels such as raw URLs, request bodies, or arbitrary header values.
+
 Acceptance criteria:
 
 - API, worker, and runner traces can be exported through standard OpenTelemetry configuration.
@@ -196,6 +264,20 @@ Scope:
 - Add artifact/log viewer.
 - Add worker retry/dead-letter visibility.
 - Add browser or component tests for critical workflows.
+
+Out of Scope:
+
+- Marketing or landing pages.
+- Full multi-tenant administration.
+- k6 script authoring UI.
+- Non-HTTP protocol builders.
+
+Limits:
+
+- Keep the first screen as the operational console.
+- Preserve raw JSON inspection for advanced users.
+- Do not hide API errors; surface actionable messages.
+- Critical controls must remain usable on common laptop-sized viewports.
 
 Acceptance criteria:
 
@@ -233,6 +315,20 @@ Scope:
 - Add warning labels and confirmations for production targets.
 - Restrict runner containers with tighter network and filesystem controls.
 - Ensure generated scripts are stored and inspectable before execution.
+
+Out of Scope:
+
+- Enterprise SSO.
+- Billing.
+- Full policy-as-code engine.
+- Replacing existing guardrails.
+
+Limits:
+
+- Safety checks must fail closed.
+- Secret redaction must apply consistently to API responses, reports, events, and logs.
+- Quotas must be enforceable per project before a run starts.
+- Production-target warnings must not block local/development targets.
 
 Acceptance criteria:
 
@@ -272,6 +368,20 @@ Scope:
 - Add explicit dependency error-rate simulation.
 - Add queue consumer slowdown simulation.
 - Add network timeout and partial outage simulations.
+
+Out of Scope:
+
+- Rewriting existing HTTP scenario behavior.
+- Supporting every protocol in one release.
+- Implicit or hidden fault injection.
+- Production chaos experiments without guardrails.
+
+Limits:
+
+- Add adapters incrementally, one protocol at a time.
+- Every protocol extension needs schema validation, tests, examples, and safety docs.
+- Failure modes must remain explicit and opt-in.
+- Reports must keep protocol-specific detail while preserving the common Wreckr summary.
 
 Acceptance criteria:
 
