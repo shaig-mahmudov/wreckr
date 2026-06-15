@@ -17,6 +17,7 @@ This repository now contains a working MVP control plane and runner:
 - response and probe-based business invariants
 - latency/error/status reports
 - HTTP API for scenarios, scenario versions, runs, reports, event timelines, live event streams, and run cancellation
+- target management for defining reusable backend environments
 - pluggable storage with memory and PostgreSQL implementations
 - immutable scenario versions linked to historical runs and reports
 - persistent run event timelines for lifecycle, request, assertion, threshold, and invariant events
