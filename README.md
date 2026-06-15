@@ -26,7 +26,7 @@ This repository now contains a working MVP control plane and runner:
 - PostgreSQL migrations for the persistent control-plane schema
 - CLI runner
 - intentionally vulnerable demo API
-- Next.js dashboard with API connectivity, run list, live event timeline, and report view
+- Next.js dashboard with API connectivity, sample scenario editing, target selection/management, run list, live event timeline, failures, report metrics, and raw JSON view
 - GitHub Actions CI for backend, frontend, and Docker Compose validation
 - Docker Compose scaffold for API, demo target, Postgres, Redis, Prometheus, and web
 
@@ -60,6 +60,18 @@ Health check:
 curl http://localhost:8080/healthz
 ```
 
+The API process creates runs by enqueueing Redis/Asynq jobs. For API-created run execution, run Redis and the worker as well:
+
+```bash
+docker compose up --build api worker redis postgres migrate demo-api web
+```
+
+Then open the dashboard at:
+
+```text
+http://localhost:3000
+```
+
 Use PostgreSQL storage instead of memory:
 
 ```bash
@@ -68,10 +80,10 @@ docker compose run --rm migrate
 WRECKR_STORE=postgres go run ./apps/api/cmd/api
 ```
 
-Run the API with the background worker locally:
+Run the full Docker Compose stack locally:
 
 ```bash
-docker compose up api worker redis postgres
+docker compose up --build
 ```
 
 ## Run Guardrails
@@ -84,6 +96,7 @@ WRECKR_MAX_REQUEST_RATE_PER_SECOND=5000
 WRECKR_MAX_RUN_DURATION_SECONDS=300
 WRECKR_MAX_REQUEST_BODY_BYTES=1048576
 WRECKR_TARGET_ALLOWLIST=api.example.com,*.internal.example.com
+WRECKR_ALLOW_METADATA_TARGETS=false
 ```
 
 The configured request-rate limit caps outgoing traffic even when a scenario omits `traffic.rate_per_second`; set `traffic.rate_per_second` when a scenario should run below that cap. Absolute request URLs are rejected unless they match the target or the configured allowlist.

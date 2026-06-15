@@ -8,7 +8,7 @@ export type TargetEnvironment = "local" | "development" | "staging" | "productio
 export type TargetRecord = {
   id: string;
   name: string;
-  base_url: string;
+  baseUrl: string;
   environment: TargetEnvironment;
   description?: string;
   headers?: Record<string, string>;
@@ -62,7 +62,7 @@ export function TargetManager({ apiURL }: { apiURL: string }) {
     if (target) {
       setEditId(target.id);
       setName(target.name);
-      setBaseUrl(target.base_url);
+      setBaseUrl(target.baseUrl);
       setEnvironment(target.environment);
       setDescription(target.description || "");
     } else {
@@ -242,7 +242,7 @@ export function TargetManager({ apiURL }: { apiURL: string }) {
                 <div key={target.id} className="run-item" style={{display: 'flex', alignItems: 'center'}}>
                   <span style={{flex: 1}}>
                     <strong>{target.name}</strong>
-                    <small>{target.base_url}</small>
+                    <small>{target.baseUrl}</small>
                   </span>
                   <em className={target.environment === 'production' ? 'bad' : target.environment === 'staging' ? 'running' : 'passed'} style={{marginRight: 10}}>
                     {target.environment}
