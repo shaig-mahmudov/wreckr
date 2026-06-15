@@ -29,8 +29,9 @@ This repository now contains a working MVP control plane and runner:
 - Next.js dashboard with API connectivity, sample scenario editing, target selection/management, run list, live event timeline, failures, report metrics, and raw JSON view
 - GitHub Actions CI for backend, frontend, and Docker Compose validation
 - Docker Compose scaffold for API, demo target, Postgres, Redis, Prometheus, and web
+- k6 script compiler for generating inspectable k6 HTTP scripts from Wreckr scenarios
 
-The CLI still runs scenarios in-process for local files. API-created runs are enqueued to Redis and executed by the worker. Object storage, k6, and Kubernetes jobs remain planned as later orchestration layers around this core.
+The CLI still runs scenarios in-process for local files. API-created runs are enqueued to Redis and executed by the worker. k6 script generation is available as an artifact-oriented compiler; k6 execution, object storage, and Kubernetes jobs remain planned as later orchestration layers around this core.
 
 ## Quick Start
 
@@ -47,6 +48,18 @@ go run ./apps/api/cmd/wreckr run ./examples/scenarios/checkout-idempotency-race.
 ```
 
 Expected result: the scenario fails because the demo API creates duplicate orders for simultaneous checkout requests.
+
+Compile a scenario into an inspectable k6 script:
+
+```bash
+go run ./apps/api/cmd/wreckr compile-k6 -o checkout-race.js ./examples/scenarios/checkout-idempotency-race.json
+```
+
+Run the generated script with k6 if it is installed locally:
+
+```bash
+k6 run checkout-race.js
+```
 
 Run the Wreckr API:
 

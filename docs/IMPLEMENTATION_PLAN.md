@@ -148,22 +148,25 @@ The current `runner` package should remain the domain engine. Asynq should orche
 
 ## Phase 4: k6 Compiler
 
-Status: planned.
+Status: partially implemented. Wreckr can compile validated HTTP scenarios into deterministic k6 scripts through the `wreckr compile-k6` CLI command. k6 execution, summary parsing, and normalized Wreckr report import remain planned.
 
 Compile Wreckr scenarios into generated k6 scripts for high-scale HTTP workloads.
 
 Initial compiler targets:
 
-- `constant-vus`
-- `ramping-vus`
-- `constant-arrival-rate`
-- `ramping-arrival-rate`
-- race/concurrency helpers
-- retry-storm helpers
+- current MVP HTTP scenario model
+- shared-iterations execution for load, burst, spike, and race-like workloads
+- retry-storm attempt/backoff generation
+- target/request headers and JSON/body payloads
+- status checks and threshold mappings
 
 Artifacts:
 
 - generated k6 script
+
+Still planned:
+
+- k6 process execution
 - k6 JSON summary
 - stdout/stderr logs
 - normalized Wreckr report
