@@ -99,6 +99,7 @@ The repository currently has automated coverage for:
 - HTTP API integration behavior.
 - Scenario version immutability.
 - PostgreSQL persistence behavior.
+- PostgreSQL target persistence and target-linked run behavior.
 - Runner traffic modes.
 - Retry storm behavior.
 - Race/idempotency detection.

@@ -70,7 +70,8 @@ Dependencies:
 
 Notes:
 
-- Target CRUD and target resolution have API coverage; PostgreSQL-specific target coverage can still be expanded here.
+- Target CRUD and target resolution now have API coverage.
+- PostgreSQL integration coverage now verifies target persistence, run target IDs, target IDs in queued events, and target-deletion behavior for historical run snapshots.
 
 ## WRK-P3: Harden Async Orchestration
 

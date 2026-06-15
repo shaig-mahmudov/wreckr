@@ -38,6 +38,58 @@ func TestPostgresStorePersistsScenariosRunsAndReports(t *testing.T) {
 	}
 	defer st.Close()
 
+	target := st.CreateTarget(TargetRecord{
+		Name:        "Postgres Demo Target",
+		BaseURL:     "http://demo-api.test",
+		Environment: TargetDevelopment,
+		Description: "target persisted by postgres store test",
+		Headers: map[string]string{
+			"X-Wreckr-Target": "postgres-demo",
+		},
+	})
+	if target.ID == "" {
+		t.Fatal("created target ID is empty")
+	}
+	if target.BaseURL != "http://demo-api.test" {
+		t.Fatalf("created target base URL = %q, want http://demo-api.test", target.BaseURL)
+	}
+	if target.Environment != TargetDevelopment {
+		t.Fatalf("created target environment = %q, want %q", target.Environment, TargetDevelopment)
+	}
+	if target.Headers["X-Wreckr-Target"] != "postgres-demo" {
+		t.Fatalf("created target headers = %#v, want X-Wreckr-Target", target.Headers)
+	}
+
+	gotTarget, ok := st.GetTarget(target.ID)
+	if !ok {
+		t.Fatal("created target was not found")
+	}
+	if gotTarget.Name != target.Name {
+		t.Fatalf("target name = %q, want %q", gotTarget.Name, target.Name)
+	}
+	if listedTargets := st.ListTargets(); len(listedTargets) != 1 {
+		t.Fatalf("target count = %d, want 1", len(listedTargets))
+	}
+
+	updatedTarget, ok := st.UpdateTarget(target.ID, TargetRecord{
+		Name:        "Postgres Staging Target",
+		BaseURL:     "http://staging-api.test",
+		Environment: TargetStaging,
+		Description: "updated target",
+		Headers: map[string]string{
+			"X-Wreckr-Target": "postgres-staging",
+		},
+	})
+	if !ok {
+		t.Fatal("target update failed")
+	}
+	if updatedTarget.BaseURL != "http://staging-api.test" {
+		t.Fatalf("updated target base URL = %q, want http://staging-api.test", updatedTarget.BaseURL)
+	}
+	if updatedTarget.Environment != TargetStaging {
+		t.Fatalf("updated target environment = %q, want %q", updatedTarget.Environment, TargetStaging)
+	}
+
 	sc := postgresTestScenario()
 	created := st.CreateScenario(sc)
 	if created.ID == "" {
@@ -56,6 +108,41 @@ func TestPostgresStorePersistsScenariosRunsAndReports(t *testing.T) {
 	}
 	if listed := st.ListScenarios(); len(listed) != 1 {
 		t.Fatalf("scenario count = %d, want 1", len(listed))
+	}
+
+	targetRunScenario := postgresTestScenario()
+	targetRunScenario.Target.ID = updatedTarget.ID
+	targetRunScenario.Target.BaseURL = updatedTarget.BaseURL
+	targetRun := st.CreateRun(created.ID, updatedTarget.ID, targetRunScenario)
+	if targetRun.ID == "" {
+		t.Fatal("target-linked run ID is empty")
+	}
+	if targetRun.TargetID != updatedTarget.ID {
+		t.Fatalf("target-linked run target ID = %q, want %q", targetRun.TargetID, updatedTarget.ID)
+	}
+	if targetRun.Scenario.Target.BaseURL != updatedTarget.BaseURL {
+		t.Fatalf("target-linked run snapshot base URL = %q, want %q", targetRun.Scenario.Target.BaseURL, updatedTarget.BaseURL)
+	}
+	targetRunEvents := st.ListRunEvents(targetRun.ID)
+	if len(targetRunEvents) != 1 || targetRunEvents[0].Metadata["target_id"] != updatedTarget.ID {
+		t.Fatalf("target-linked run events = %#v, want queued event with target_id %q", targetRunEvents, updatedTarget.ID)
+	}
+
+	if !st.DeleteTarget(updatedTarget.ID) {
+		t.Fatal("target delete failed")
+	}
+	if _, ok := st.GetTarget(updatedTarget.ID); ok {
+		t.Fatal("deleted target was found")
+	}
+	targetRunAfterDelete, ok := st.GetRun(targetRun.ID)
+	if !ok {
+		t.Fatal("target-linked run was not found after target delete")
+	}
+	if targetRunAfterDelete.TargetID != "" {
+		t.Fatalf("target-linked run target ID after delete = %q, want empty", targetRunAfterDelete.TargetID)
+	}
+	if targetRunAfterDelete.Scenario.Target.BaseURL != updatedTarget.BaseURL {
+		t.Fatalf("target-linked run snapshot base URL after delete = %q, want %q", targetRunAfterDelete.Scenario.Target.BaseURL, updatedTarget.BaseURL)
 	}
 
 	run := st.CreateRun(created.ID, "", sc)
@@ -135,8 +222,8 @@ func TestPostgresStorePersistsScenariosRunsAndReports(t *testing.T) {
 	if completed.Report.Summary.TotalRequests != 1 {
 		t.Fatalf("report total requests = %d, want 1", completed.Report.Summary.TotalRequests)
 	}
-	if listed := st.ListRuns(); len(listed) != 1 {
-		t.Fatalf("run count = %d, want 1", len(listed))
+	if listed := st.ListRuns(); len(listed) != 2 {
+		t.Fatalf("run count = %d, want 2", len(listed))
 	}
 	events = st.ListRunEvents(run.ID)
 	if len(events) < 3 || events[len(events)-1].Type != runevent.TypeRunCompleted {
