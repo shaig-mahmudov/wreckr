@@ -35,6 +35,7 @@ type Scenario struct {
 }
 
 type Target struct {
+	ID      string            `json:"target_id,omitempty"`
 	BaseURL string            `json:"base_url"`
 	Headers map[string]string `json:"headers,omitempty"`
 }
