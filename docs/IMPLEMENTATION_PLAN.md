@@ -125,6 +125,7 @@ Implemented:
 - Durable cancellation requests stored in the run event timeline.
 - Worker-owned running jobs observe cancellation requests and finalize as `canceled`.
 - Terminal-state protection prevents late worker completion/error paths from overwriting canceled runs.
+- Worker attempt, retry-scheduled, and dead-letter-exhausted states are persisted into the run event timeline with Asynq task metadata.
 - Docker Compose starts API, worker, Redis, Postgres, and migrations together.
 
 Current worker responsibilities:
@@ -132,6 +133,7 @@ Current worker responsibilities:
 - load queued run
 - launch runner
 - poll for durable cancellation requests
+- record worker attempt and retry/dead-letter state
 - finalize report
 
 Operational note:
@@ -141,7 +143,7 @@ Operational note:
 Still planned:
 
 - artifact collection
-- richer retry/dead-letter visibility
+- dashboard retry/dead-letter visibility
 - worker metrics
 
 The current `runner` package should remain the domain engine. Asynq should orchestrate it, not replace it.
@@ -201,7 +203,7 @@ Live monitoring follow-up:
 
 - richer event filtering and grouping in the dashboard
 - optional WebSocket support if bidirectional control becomes necessary
-- add worker retry/dead-letter event visibility
+- add dashboard rendering for worker retry/dead-letter events
 
 ## Phase 6: Frontend Dashboard
 

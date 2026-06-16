@@ -133,7 +133,7 @@ Limits:
 Acceptance criteria:
 
 - A running worker-owned job can be canceled from `POST /v1/runs/{id}/cancel`.
-- Queued, running, retried, failed, canceled, and completed worker states appear in the run event timeline.
+- Queued, running, retried, dead-lettered, failed, canceled, and completed worker states appear in the run event timeline.
 - Failed jobs surface enough retry/dead-letter context for dashboard display.
 - Worker metrics can be scraped by Prometheus.
 - Tests cover queued cancellation, running distributed cancellation, retry metadata, and terminal state transitions.
@@ -146,7 +146,7 @@ Dependencies:
 Notes:
 
 - Current API run creation already enqueues `runs.execute` jobs through Asynq.
-- Durable cancellation requests and worker-owned running cancellation are implemented; retry/dead-letter visibility and worker metrics remain open.
+- Durable cancellation requests, worker-owned running cancellation, and persisted worker retry/dead-letter timeline events are implemented; dashboard retry/dead-letter visibility and worker metrics remain open.
 
 ## WRK-P4: Add k6 Compiler
 
