@@ -33,6 +33,7 @@ The Docker Compose stack is the most complete local environment. It starts the A
 - Run create, list, status, report, event timeline, live event stream, and cancellation endpoints.
 - Target resolution through `target_id`, including target-level headers merged with scenario headers.
 - Persistent run event timelines for lifecycle, hook, request, assertion, threshold, invariant, cancellation, and terminal-state events.
+- Worker attempt, retry-scheduled, and dead-letter-exhausted events persisted into run timelines for Asynq-owned runs.
 - Server-Sent Events stream for live run progress.
 - Redis + Asynq orchestration for API-created runs.
 - Separate worker process for queued run execution.
@@ -124,7 +125,7 @@ Coverage gaps:
 
 ## Main Gaps
 
-- Async orchestration does not yet expose retry/dead-letter dashboards or persisted retry visibility.
+- Async orchestration does not yet expose retry/dead-letter dashboards.
 - Run event streaming uses SSE today; WebSocket support is not implemented.
 - k6 execution, JSON summary parsing, and normalized k6 report import are not implemented yet.
 - Object storage and report artifact retention are not implemented yet.
@@ -135,8 +136,8 @@ Coverage gaps:
 
 ## Recommended Next Milestones
 
-1. Add worker retry/dead-letter visibility into the persisted timeline and dashboard.
+1. Add worker retry/dead-letter visibility to the dashboard.
 2. Add persisted scenario editing to the dashboard.
 3. Add object storage for raw reports, logs, generated scripts, and artifacts.
-4. Add OpenTelemetry traces and richer Prometheus metrics.
+4. Add OpenTelemetry traces, worker metrics, and richer Prometheus metrics.
 5. Add k6 execution and summary normalization for higher-scale HTTP workloads.

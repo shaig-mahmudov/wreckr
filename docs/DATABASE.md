@@ -76,7 +76,7 @@ Targets are modeled in `targets` and can be linked to runs through `runs.target_
 
 Runs store `target_id`, `scenario_id`, and `scenario_version_id`, plus a JSON scenario snapshot, so old reports continue to show the exact target-resolved scenario version that executed even after the scenario or target is edited.
 
-Run events are stored in `run_events` with a per-run sequence number, event level, event type, message, structured JSON metadata, and timestamp. The API returns them in chronological sequence through `GET /v1/runs/{id}/events` and streams them live through `GET /v1/runs/{id}/events/stream`.
+Run events are stored in `run_events` with a per-run sequence number, event level, event type, message, structured JSON metadata, and timestamp. The API returns them in chronological sequence through `GET /v1/runs/{id}/events` and streams them live through `GET /v1/runs/{id}/events/stream`. Worker-owned Asynq runs also persist `worker_attempt_started`, `worker_attempt_failed`, `worker_retry_scheduled`, and `worker_dead_lettered` events with task, queue, attempt, and retry metadata.
 
 Run lifecycle state is stored in the `run_status` enum and used by both `runs.status` and `reports.status`.
 
