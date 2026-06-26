@@ -36,7 +36,7 @@ The Docker Compose stack is the most complete local environment. It starts the A
 - Server-Sent Events stream for live run progress.
 - Redis + Asynq orchestration for API-created runs.
 - Separate worker process for queued run execution.
-- Deterministic k6 script compiler and `wreckr compile-k6` CLI command for generating inspectable HTTP scripts from scenarios.
+- Deterministic k6 script compiler and execution integration (K6Runner) for generating scripts, executing them, parsing summary JSON files, and importing normalized Wreckr reports.
 - Immutable scenario versioning.
 - Memory store and PostgreSQL store behind a shared `Store` interface.
 - PostgreSQL migrations for projects, targets, scenarios, scenario versions, runs, run events, and reports.
@@ -126,7 +126,6 @@ Coverage gaps:
 
 - Async orchestration does not yet expose retry/dead-letter dashboards or persisted retry visibility.
 - Run event streaming uses SSE today; WebSocket support is not implemented.
-- k6 execution, JSON summary parsing, and normalized k6 report import are not implemented yet.
 - Object storage and report artifact retention are not implemented yet.
 - OpenTelemetry tracing is not implemented yet.
 - Dashboard does not yet include persisted scenario editing, artifact/log viewing, project management, richer invariant analysis, or retry/dead-letter visibility.
@@ -139,4 +138,3 @@ Coverage gaps:
 2. Add persisted scenario editing to the dashboard.
 3. Add object storage for raw reports, logs, generated scripts, and artifacts.
 4. Add OpenTelemetry traces and richer Prometheus metrics.
-5. Add k6 execution and summary normalization for higher-scale HTTP workloads.
