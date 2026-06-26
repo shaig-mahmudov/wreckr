@@ -1,6 +1,6 @@
 # Wreckr Decisions
 
-Last updated: 2026-06-15
+Last updated: 2026-06-26
 
 This document records the important product and technical decisions made so far. Each entry explains why the decision was made, what we expected, what we observed after implementation, and two alternatives we intentionally did not choose.
 
@@ -219,3 +219,21 @@ Expected if chosen: Isolation and scale would improve earlier, but local develop
 Alternative 2: Start with object storage and artifacts before reports/events.
 
 Expected if chosen: Artifact retention would be ready sooner, but there would be fewer meaningful artifacts to store before the report and event model stabilized.
+
+## DEC-013: Add Visual Scenario Builder Alongside JSON/YAML Editing
+
+Decision: Implement a visual, form-based scenario builder as the default interface while retaining the raw JSON/YAML text editor as a toggle.
+
+Why: Non-technical users and developers wanting quick scenario mockups need an intuitive visual way to construct HTTP paths, header inputs, and traffic shapes without syntax errors. However, power users still need the ability to edit raw configurations.
+
+Expected: Users can construct complex HTTP scenarios visually with instant feedback while retaining full fidelity and serialization control.
+
+Result: Next.js dashboard features a visual builder for metadata, targets, traffic profiles, and requests list. Users can toggle to JSON/YAML mode seamlessly. If invalid formatting is input, we prevent visual mode switching and show a validation error.
+
+Alternative 1: Replace raw JSON/YAML editor entirely with form inputs.
+
+Expected if chosen: The UI would be simpler, but developers could not copy-paste complex config files or quickly customize details outside the form's structured bounds.
+
+Alternative 2: Keep only raw text editor and add auto-complete/LSP tooling.
+
+Expected if chosen: Helping users with schema definition would be possible, but it wouldn't eliminate the friction of learning the JSON/YAML structure, and errors would still be common.
