@@ -872,3 +872,260 @@ textarea:focus {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Visual Scenario Builder Styles */
+.visual-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 24px;
+  min-height: calc(100vh - 176px);
+  box-shadow: var(--shadow);
+  overflow-y: auto;
+}
+
+.visual-editor h3 {
+  font-size: 1.1rem;
+  font-weight: 800;
+  margin: 0 0 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.form-grid.single-col {
+  grid-template-columns: 1fr;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-group.span-2 {
+  grid-column: span 2;
+}
+
+.form-group label {
+  font-size: 0.76rem;
+  font-weight: 850;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: var(--bg);
+  color: var(--ink);
+  outline: none;
+  font-family: inherit;
+  font-size: 0.9rem;
+  transition: border-color 0.15s ease;
+}
+
+.form-group textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  border-color: var(--blue);
+  background: var(--surface);
+}
+
+.builder-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.section-header-row h3 {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px dashed var(--blue);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--blue);
+  font-size: 0.8rem;
+  font-weight: 800;
+  transition: all 0.15s ease;
+}
+
+.add-btn:hover {
+  background: rgba(40, 103, 168, 0.08);
+  border-style: solid;
+}
+
+.request-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.request-card:hover {
+  border-color: var(--line);
+  box-shadow: 0 4px 12px rgba(40, 35, 26, 0.04);
+}
+
+.request-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  user-select: none;
+}
+
+.request-card-header:hover {
+  background: var(--surface-2);
+}
+
+.request-title-area {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.method-badge {
+  font-size: 0.72rem;
+  font-weight: 900;
+  padding: 3px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  min-width: 52px;
+  text-align: center;
+}
+
+.method-badge.get { background: #e3f2fd; color: #1565c0; }
+.method-badge.post { background: #e8f5e9; color: #2e7d32; }
+.method-badge.put { background: #fff3e0; color: #ef6c00; }
+.method-badge.delete { background: #ffebee; color: #c62828; }
+.method-badge.patch { background: #f3e5f5; color: #6a1b9a; }
+
+.request-name-display {
+  font-weight: 750;
+  font-size: 0.95rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.request-path-display {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.delete-card-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  transition: all 0.15s ease;
+}
+
+.delete-card-btn:hover {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.request-card-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.headers-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.header-row {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 32px;
+  gap: 8px;
+  align-items: center;
+}
+
+.header-row input {
+  min-height: 36px;
+}
+
+.editor-toolbar .segmented-control button svg {
+  margin-right: 4px;
+}
+
+@media (max-width: 720px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .form-group.span-2 {
+    grid-column: span 1;
+  }
+  .header-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+  }
+  .header-row button {
+    grid-column: span 2;
+    margin-top: 4px;
+  }
+}
+
