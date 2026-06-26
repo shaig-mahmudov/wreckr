@@ -1,6 +1,6 @@
 # Wreckr Project Status
 
-Last updated: 2026-06-16
+Last updated: 2026-06-26
 
 ## Current State
 
@@ -55,6 +55,7 @@ The Docker Compose stack is the most complete local environment. It starts the A
 - GitHub Actions CI for backend tests, backend vet, frontend build, and Docker Compose config validation.
 - Docker Compose stack for API, worker, dashboard, demo API, PostgreSQL, Redis, migrations, and Prometheus.
 - S3-compatible Object Storage integration for archiving massive raw JSON reports (offloading Postgres raw_report data).
+- Visual Scenario Builder UI in the Next.js dashboard to edit scenarios without writing raw JSON/YAML, keeping the advanced JSON/YAML editor as a toggle.
 
 ## Storage
 
@@ -129,12 +130,11 @@ Coverage gaps:
 - Async orchestration does not yet expose retry/dead-letter dashboards.
 - Run event streaming uses SSE today; WebSocket support is not implemented.
 - OpenTelemetry tracing is not implemented yet.
-- Dashboard does not yet include persisted scenario editing, artifact/log viewing, project management, richer invariant analysis, or retry/dead-letter visibility.
+- Dashboard does not yet include artifact/log viewing, project management, richer invariant analysis, or retry/dead-letter visibility.
 - Non-HTTP protocols such as gRPC, WebSocket, NATS, Kafka, and queue replay are still planned.
 - Secrets management, redaction, quotas, audit logs, and production-target warning labels are still planned.
 
 ## Recommended Next Milestones
 
 1. Add worker retry/dead-letter visibility to the dashboard.
-2. Add persisted scenario editing to the dashboard.
-3. Add OpenTelemetry traces and richer Prometheus metrics.
+2. Add OpenTelemetry traces and richer Prometheus metrics.
