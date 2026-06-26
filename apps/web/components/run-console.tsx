@@ -1,9 +1,12 @@
 "use client";
 
 import { Activity, AlertTriangle, CheckCircle2, FileJson, ListChecks, Play, RefreshCw, ServerCrash, XCircle } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { checkoutRaceScenario, loginBurstScenario } from "../lib/sample-scenarios";
-import { TargetRecord, TargetManager } from "./target-manager";
+import { useAPIURL } from "../lib/use-api-url";
+import { TargetManager, type TargetRecord } from "./target-manager";
+
 
 type WreckrReport = {
   status: "passed" | "failed" | "canceled";
@@ -26,6 +29,7 @@ type WreckrReport = {
 
 type RunRecord = {
   id: string;
+  target_id?: string;
   scenario_id?: string;
   status: "queued" | "running" | "passed" | "failed" | "errored" | "canceled";
   scenario?: {
@@ -89,7 +93,7 @@ const streamEventTypes = [
 const terminalEventTypes = new Set(["run_completed", "run_failed", "run_canceled"]);
 
 export function RunConsole() {
-  const [apiURL, setAPIURL] = useState(process.env.NEXT_PUBLIC_WRECKR_API_URL ?? "http://localhost:8080");
+  const [apiURL, setAPIURL] = useAPIURL();
   const [selectedSample, setSelectedSample] = useState(samples[0].id);
   const [scenarioText, setScenarioText] = useState(JSON.stringify(samples[0].value, null, 2));
   const [latestRun, setLatestRun] = useState<RunResponse | null>(null);
@@ -119,8 +123,7 @@ export function RunConsole() {
 
   useEffect(() => {
     void refreshRuns();
-    void refreshTargets();
-  }, []);
+  }, [apiURL]);
 
   useEffect(() => {
     if (!selectedRunID) {
@@ -278,9 +281,14 @@ export function RunConsole() {
           <p className="eyebrow">Wreckr</p>
           <h1>Production Scenario Console</h1>
         </div>
-        <div className={`run-state ${statusClass}`}>
-          {activeReport?.status === "passed" ? <CheckCircle2 size={18} /> : activeReport?.status === "failed" ? <XCircle size={18} /> : <ServerCrash size={18} />}
-          <span>{activeStatus}</span>
+        <div className="topbar-actions">
+          <nav className="nav-actions" aria-label="Dashboard navigation">
+            <Link href="/scenarios">Scenarios</Link>
+          </nav>
+          <div className={`run-state ${statusClass}`}>
+            {activeReport?.status === "passed" ? <CheckCircle2 size={18} /> : activeReport?.status === "failed" ? <XCircle size={18} /> : <ServerCrash size={18} />}
+            <span>{activeStatus}</span>
+          </div>
         </div>
       </header>
 

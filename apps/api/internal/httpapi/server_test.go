@@ -427,6 +427,23 @@ func TestScenarioUpdateCreatesVersionWithoutMutatingOldRunReport(t *testing.T) {
 		t.Fatalf("version count = %d, want 2", len(versions.Versions))
 	}
 
+	firstVersion := getJSON[store.ScenarioVersionRecord](t, api.URL+"/v1/scenarios/"+created.ID+"/versions/1", http.StatusOK)
+	if firstVersion.VersionNumber != 1 || firstVersion.Scenario.Name != "api-integration-scenario" {
+		t.Fatalf("first version = %#v, want original scenario", firstVersion)
+	}
+
+	selectedVersionRun := postJSON[store.RunRecord](t, api.URL+"/v1/runs", map[string]any{
+		"scenario_id":             created.ID,
+		"scenario_version_number": 1,
+		"sync":                    true,
+	}, http.StatusCreated)
+	if selectedVersionRun.ScenarioVersionNumber != 1 {
+		t.Fatalf("selected version run version = %d, want 1", selectedVersionRun.ScenarioVersionNumber)
+	}
+	if selectedVersionRun.Scenario.Name != "api-integration-scenario" {
+		t.Fatalf("selected version run scenario = %q, want original scenario name", selectedVersionRun.Scenario.Name)
+	}
+
 	oldReport := getJSON[report.Report](t, api.URL+"/v1/runs/"+run.ID+"/report", http.StatusOK)
 	if oldReport.ScenarioVersionNumber != 1 {
 		t.Fatalf("old report version = %d, want 1", oldReport.ScenarioVersionNumber)

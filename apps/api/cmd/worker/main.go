@@ -24,6 +24,14 @@ func main() {
 	if concurrency <= 0 {
 		concurrency = 1
 	}
+	workerHandler := worker.Handler{
+		Executor: runexec.Executor{
+			Store:   st,
+			Runner:  runner.New(),
+			Timeout: cfg.RunTimeout,
+		},
+		Events: st,
+	}
 	server := asynq.NewServer(
 		asynq.RedisClientOpt{Addr: cfg.RedisAddr},
 		asynq.Config{
@@ -31,6 +39,7 @@ func main() {
 			Queues: map[string]int{
 				runqueue.QueueRuns: 1,
 			},
+			ErrorHandler: workerHandler,
 		},
 	)
 

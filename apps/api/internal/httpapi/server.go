@@ -58,8 +58,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/targets/{id}", s.deleteTarget)
 	mux.HandleFunc("GET /v1/scenarios", s.listScenarios)
 	mux.HandleFunc("POST /v1/scenarios", s.createScenario)
-	mux.HandleFunc("PUT /v1/scenarios/", s.updateScenario)
-	mux.HandleFunc("GET /v1/scenarios/", s.getScenario)
+	mux.HandleFunc("GET /v1/scenarios/{id}", s.getScenario)
+	mux.HandleFunc("PUT /v1/scenarios/{id}", s.updateScenario)
+	mux.HandleFunc("GET /v1/scenarios/{id}/versions", s.listScenarioVersions)
+	mux.HandleFunc("GET /v1/scenarios/{id}/versions/{version}", s.getScenarioVersion)
 	mux.HandleFunc("GET /v1/runs", s.listRuns)
 	mux.HandleFunc("POST /v1/runs", s.createRun)
 	mux.HandleFunc("POST /v1/runs/{id}/cancel", s.cancelRun)
@@ -209,17 +211,7 @@ func (s *Server) listScenarios(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) getScenario(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/v1/scenarios/")
-	if strings.HasSuffix(id, "/versions") {
-		id = strings.TrimSuffix(id, "/versions")
-		versions := s.store.ListScenarioVersions(id)
-		if len(versions) == 0 {
-			writeError(w, http.StatusNotFound, fmt.Errorf("scenario %q not found", id))
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"versions": versions})
-		return
-	}
+	id := r.PathValue("id")
 	record, ok := s.store.GetScenario(id)
 	if !ok {
 		writeError(w, http.StatusNotFound, fmt.Errorf("scenario %q not found", id))
@@ -228,9 +220,34 @@ func (s *Server) getScenario(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, record)
 }
 
+func (s *Server) listScenarioVersions(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	versions := s.store.ListScenarioVersions(id)
+	if len(versions) == 0 {
+		writeError(w, http.StatusNotFound, fmt.Errorf("scenario %q not found", id))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"versions": versions})
+}
+
+func (s *Server) getScenarioVersion(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	versionNumber, err := strconv.Atoi(r.PathValue("version"))
+	if err != nil || versionNumber < 1 {
+		writeError(w, http.StatusBadRequest, errors.New("scenario version must be a positive integer"))
+		return
+	}
+	version, ok := s.store.GetScenarioVersion(id, versionNumber)
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("scenario %q version %d not found", id, versionNumber))
+		return
+	}
+	writeJSON(w, http.StatusOK, version)
+}
+
 func (s *Server) updateScenario(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/v1/scenarios/")
-	if id == "" || strings.Contains(id, "/") {
+	id := r.PathValue("id")
+	if id == "" {
 		writeError(w, http.StatusNotFound, fmt.Errorf("scenario %q not found", id))
 		return
 	}
@@ -267,6 +284,7 @@ func (s *Server) updateScenario(w http.ResponseWriter, r *http.Request) {
 type createRunRequest struct {
 	ScenarioID string             `json:"scenario_id,omitempty"`
 	TargetID   string             `json:"target_id,omitempty"`
+  ScenarioVersionNumber int                `json:"scenario_version_number,omitempty"`
 	Scenario   *scenario.Scenario `json:"scenario,omitempty"`
 	Sync       bool               `json:"sync,omitempty"`
 }
@@ -278,22 +296,38 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var sc scenario.Scenario
-	scenarioID := req.ScenarioID
-	targetID := strings.TrimSpace(req.TargetID)
-	if req.Scenario != nil {
-		sc = *req.Scenario
-	} else if req.ScenarioID != "" {
-		record, ok := s.store.GetScenario(req.ScenarioID)
+var sc scenario.Scenario
+
+scenarioID := strings.TrimSpace(req.ScenarioID)
+targetID := strings.TrimSpace(req.TargetID)
+
+var versionRef []store.ScenarioVersionRecord
+
+if req.Scenario != nil {
+	sc = *req.Scenario
+} else if scenarioID != "" {
+	if req.ScenarioVersionNumber > 0 {
+		version, ok := s.store.GetScenarioVersion(scenarioID, req.ScenarioVersionNumber)
 		if !ok {
-			writeError(w, http.StatusNotFound, fmt.Errorf("scenario %q not found", req.ScenarioID))
+			writeError(w, http.StatusNotFound, fmt.Errorf("scenario %q version %d not found", scenarioID, req.ScenarioVersionNumber))
 			return
 		}
-		sc = record.Scenario
+
+		sc = version.Scenario
+		versionRef = append(versionRef, version)
 	} else {
-		writeError(w, http.StatusBadRequest, errors.New("scenario_id or scenario is required"))
-		return
+		record, ok := s.store.GetScenario(scenarioID)
+		if !ok {
+			writeError(w, http.StatusNotFound, fmt.Errorf("scenario %q not found", scenarioID))
+			return
+		}
+
+		sc = record.Scenario
 	}
+} else {
+	writeError(w, http.StatusBadRequest, errors.New("scenario_id or scenario is required"))
+	return
+}
 
 	var err error
 	sc, targetID, err = s.resolveScenarioTarget(sc, targetID)
@@ -312,16 +346,18 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 	}
 	sc = s.applyRunGuardrails(sc)
 
-	runRecord := s.store.CreateRun(scenarioID, targetID, sc)
-	if s.queue != nil {
-		if err := s.queue.EnqueueRun(r.Context(), runRecord.ID); err != nil {
-			s.store.ErrorRun(runRecord.ID, fmt.Errorf("enqueue run: %w", err))
-			writeError(w, http.StatusServiceUnavailable, fmt.Errorf("enqueue run: %w", err))
-			return
-		}
-		writeJSON(w, http.StatusAccepted, runRecord)
-		return
-	}
+  runRecord := s.store.CreateRun(scenarioID, targetID, sc, versionRef...)
+
+  if s.queue != nil {
+    if err := s.queue.EnqueueRun(r.Context(), runRecord.ID); err != nil {
+      s.store.ErrorRun(runRecord.ID, fmt.Errorf("enqueue run: %w", err))
+      writeError(w, http.StatusServiceUnavailable, fmt.Errorf("enqueue run: %w", err))
+      return
+    }
+
+    writeJSON(w, http.StatusAccepted, runRecord)
+    return
+  }
 
 	if req.Sync {
 		s.executeRun(r.Context(), runRecord.ID, sc)
