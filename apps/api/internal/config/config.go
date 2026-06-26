@@ -19,6 +19,7 @@ type Config struct {
 
 	RedisAddr         string
 	WorkerConcurrency int
+	RunnerEngine      string
 }
 
 type Guardrails struct {
@@ -49,6 +50,7 @@ func FromEnv() Config {
 		DatabaseURL:       envString("DATABASE_URL", "postgres://wreckr:wreckr@localhost:5432/wreckr?sslmode=disable"),
 		RedisAddr:         envString("REDIS_ADDR", "localhost:6379"),
 		WorkerConcurrency: envInt("WRECKR_WORKER_CONCURRENCY", 4),
+		RunnerEngine:      envString("WRECKR_RUNNER_ENGINE", "go"),
 	}
 }
 

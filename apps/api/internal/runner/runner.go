@@ -21,6 +21,10 @@ import (
 
 const maxBodyPreviewBytes = 4096
 
+type ScenarioRunner interface {
+	RunWithOptions(ctx context.Context, sc scenario.Scenario, opts RunOptions) (report.Report, error)
+}
+
 type Runner struct {
 	Client *http.Client
 }

@@ -34,11 +34,16 @@ func main() {
 		},
 	)
 
+	var r runner.ScenarioRunner = runner.New()
+	if cfg.RunnerEngine == "k6" {
+		r = runner.NewK6Runner()
+	}
+
 	mux := asynq.NewServeMux()
 	worker.Handler{
 		Executor: runexec.Executor{
 			Store:   st,
-			Runner:  runner.New(),
+			Runner:  r,
 			Timeout: cfg.RunTimeout,
 		},
 	}.Register(mux)

@@ -14,7 +14,7 @@ import (
 
 type Executor struct {
 	Store               store.Store
-	Runner              *runner.Runner
+	Runner              runner.ScenarioRunner
 	Timeout             time.Duration
 	CancelCheckInterval time.Duration
 }
