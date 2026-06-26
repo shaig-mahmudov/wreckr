@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wreckr/wreckr/apps/api/internal/blob"
 	"github.com/wreckr/wreckr/apps/api/internal/config"
 	"github.com/wreckr/wreckr/apps/api/internal/store"
 )
@@ -20,6 +21,13 @@ func OpenStore(cfg config.Config) (store.Store, error) {
 	default:
 		return nil, &UnknownStoreError{Backend: cfg.StoreBackend}
 	}
+}
+
+func OpenBlobStore(ctx context.Context, cfg config.Config) (blob.Store, error) {
+	if strings.ToLower(cfg.StoreBackend) == "memory" || cfg.S3.Endpoint == "" {
+		return blob.NewMemoryStore(), nil
+	}
+	return blob.NewS3Store(ctx, cfg.S3)
 }
 
 type UnknownStoreError struct {
