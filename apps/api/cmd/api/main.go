@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 
@@ -17,10 +18,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	blobStore, err := app.OpenBlobStore(context.Background(), cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
 	queue := runqueue.NewAsynqEnqueuer(cfg.RedisAddr, cfg.RunTimeout)
 	defer queue.Close()
 
-	server := httpapi.NewWithQueue(cfg, st, runner.New(), queue)
+	server := httpapi.NewWithQueue(cfg, st, blobStore, runner.New(), queue)
 
 	log.Printf("wreckr api listening on %s", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, server.Handler()); err != nil {
