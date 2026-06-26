@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/wreckr/wreckr/apps/api/internal/blob"
 	"github.com/wreckr/wreckr/apps/api/internal/report"
 	"github.com/wreckr/wreckr/apps/api/internal/runevent"
 	"github.com/wreckr/wreckr/apps/api/internal/runner"
@@ -14,6 +15,7 @@ import (
 
 type Executor struct {
 	Store               store.Store
+	BlobStore           blob.Store
 	Runner              runner.ScenarioRunner
 	Timeout             time.Duration
 	CancelCheckInterval time.Duration
@@ -40,7 +42,9 @@ func (e Executor) Execute(ctx context.Context, runID string) error {
 	defer cancel()
 
 	if e.Store.IsRunCancelRequested(runID) {
-		e.Store.CancelRun(runID, canceledReport(runID, record.Scenario.Name, "run canceled before worker execution"))
+		rep := canceledReport(runID, record.Scenario.Name, "run canceled before worker execution")
+		e.uploadReport(ctx, runID, rep)
+		e.Store.CancelRun(runID, rep)
 		return nil
 	}
 
@@ -68,6 +72,7 @@ func (e Executor) Execute(ctx context.Context, runID string) error {
 			rep = canceledReport(runID, record.Scenario.Name, err.Error())
 		}
 		rep.Failures = appendIfMissing(rep.Failures, "run canceled by user")
+		e.uploadReport(ctx, runID, rep)
 		e.Store.CancelRun(runID, rep)
 		return nil
 	}
@@ -75,8 +80,20 @@ func (e Executor) Execute(ctx context.Context, runID string) error {
 		e.Store.ErrorRun(runID, err)
 		return err
 	}
+	e.uploadReport(ctx, runID, rep)
 	e.Store.CompleteRun(runID, rep)
 	return nil
+}
+
+func (e Executor) uploadReport(ctx context.Context, runID string, rep report.Report) {
+	if e.BlobStore == nil {
+		return
+	}
+	raw, err := rep.JSON()
+	if err != nil {
+		return
+	}
+	_ = e.BlobStore.Put(ctx, fmt.Sprintf("runs/%s/report.json", runID), raw, "application/json")
 }
 
 func (e Executor) monitorCancellation(ctx context.Context, stop <-chan struct{}, runID string, cancel context.CancelFunc, requested *atomic.Bool) {

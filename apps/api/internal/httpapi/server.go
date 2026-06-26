@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wreckr/wreckr/apps/api/internal/blob"
 	"github.com/wreckr/wreckr/apps/api/internal/config"
 	"github.com/wreckr/wreckr/apps/api/internal/guardrails"
 	"github.com/wreckr/wreckr/apps/api/internal/report"
@@ -22,24 +23,26 @@ import (
 )
 
 type Server struct {
-	cfg    config.Config
-	store  store.Store
-	runner *runner.Runner
-	queue  runqueue.Enqueuer
+	cfg       config.Config
+	store     store.Store
+	blobStore blob.Store
+	runner    *runner.Runner
+	queue     runqueue.Enqueuer
 
 	cancelMu       sync.Mutex
 	runCancels     map[string]context.CancelFunc
 	cancelRequests map[string]struct{}
 }
 
-func New(cfg config.Config, st store.Store, rn *runner.Runner) *Server {
-	return NewWithQueue(cfg, st, rn, nil)
+func New(cfg config.Config, st store.Store, bs blob.Store, rn *runner.Runner) *Server {
+	return NewWithQueue(cfg, st, bs, rn, nil)
 }
 
-func NewWithQueue(cfg config.Config, st store.Store, rn *runner.Runner, queue runqueue.Enqueuer) *Server {
+func NewWithQueue(cfg config.Config, st store.Store, bs blob.Store, rn *runner.Runner, queue runqueue.Enqueuer) *Server {
 	return &Server{
 		cfg:            cfg,
 		store:          st,
+		blobStore:      bs,
 		runner:         rn,
 		queue:          queue,
 		runCancels:     map[string]context.CancelFunc{},
@@ -383,6 +386,16 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasSuffix(path, "/report") {
+		if s.blobStore != nil {
+			data, err := s.blobStore.Get(r.Context(), fmt.Sprintf("runs/%s/report.json", id))
+			if err == nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(data)
+				return
+			}
+		}
+
 		if record.Report == nil {
 			writeError(w, http.StatusConflict, errors.New("report is not ready"))
 			return

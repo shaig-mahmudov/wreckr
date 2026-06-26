@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 
 	"github.com/hibiken/asynq"
@@ -20,15 +21,21 @@ func main() {
 		log.Fatal(err)
 	}
 
+	blobStore, err := app.OpenBlobStore(context.Background(), cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	concurrency := cfg.WorkerConcurrency
 	if concurrency <= 0 {
 		concurrency = 1
 	}
 	workerHandler := worker.Handler{
 		Executor: runexec.Executor{
-			Store:   st,
-			Runner:  runner.New(),
-			Timeout: cfg.RunTimeout,
+			Store:     st,
+			BlobStore: blobStore,
+			Runner:    runner.New(),
+			Timeout:   cfg.RunTimeout,
 		},
 		Events: st,
 	}
@@ -51,9 +58,10 @@ func main() {
 	mux := asynq.NewServeMux()
 	worker.Handler{
 		Executor: runexec.Executor{
-			Store:   st,
-			Runner:  r,
-			Timeout: cfg.RunTimeout,
+			Store:     st,
+			BlobStore: blobStore,
+			Runner:    r,
+			Timeout:   cfg.RunTimeout,
 		},
 	}.Register(mux)
 

@@ -20,6 +20,17 @@ type Config struct {
 	RedisAddr         string
 	WorkerConcurrency int
 	RunnerEngine      string
+	S3                S3Config
+}
+
+type S3Config struct {
+	Endpoint        string
+	Region          string
+	Bucket          string
+	AccessKeyID     string
+	SecretAccessKey string
+	DisableSSL      bool
+	ForcePathStyle  bool
 }
 
 type Guardrails struct {
@@ -51,6 +62,15 @@ func FromEnv() Config {
 		RedisAddr:         envString("REDIS_ADDR", "localhost:6379"),
 		WorkerConcurrency: envInt("WRECKR_WORKER_CONCURRENCY", 4),
 		RunnerEngine:      envString("WRECKR_RUNNER_ENGINE", "go"),
+		S3: S3Config{
+			Endpoint:        os.Getenv("WRECKR_S3_ENDPOINT"),
+			Region:          envString("WRECKR_S3_REGION", "us-east-1"),
+			Bucket:          envString("WRECKR_S3_BUCKET", "wreckr-artifacts"),
+			AccessKeyID:     os.Getenv("WRECKR_S3_ACCESS_KEY_ID"),
+			SecretAccessKey: os.Getenv("WRECKR_S3_SECRET_ACCESS_KEY"),
+			DisableSSL:      envBool("WRECKR_S3_DISABLE_SSL", false),
+			ForcePathStyle:  envBool("WRECKR_S3_FORCE_PATH_STYLE", false),
+		},
 	}
 }
 

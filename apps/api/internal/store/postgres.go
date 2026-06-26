@@ -576,10 +576,7 @@ func (p *Postgres) finishRunWithReport(id string, status RunStatus, rep report.R
 		rep.ScenarioVersionID = run.ScenarioVersionID
 		rep.ScenarioVersionNumber = run.ScenarioVersionNumber
 	}
-	rawReport, err := json.Marshal(rep)
-	if err != nil {
-		return false
-	}
+
 	summary, _ := json.Marshal(rep.Summary)
 	thresholds, _ := json.Marshal(rep.Thresholds)
 	invariants, _ := json.Marshal(rep.Invariants)
@@ -605,17 +602,16 @@ func (p *Postgres) finishRunWithReport(id string, status RunStatus, rep report.R
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO reports (run_id, status, summary, thresholds, invariants, failures, raw_report)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO reports (run_id, status, summary, thresholds, invariants, failures)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (run_id)
 		DO UPDATE SET
 			status = EXCLUDED.status,
 			summary = EXCLUDED.summary,
 			thresholds = EXCLUDED.thresholds,
 			invariants = EXCLUDED.invariants,
-			failures = EXCLUDED.failures,
-			raw_report = EXCLUDED.raw_report
-	`, id, status, summary, thresholds, invariants, failures, rawReport); err != nil {
+			failures = EXCLUDED.failures
+	`, id, status, summary, thresholds, invariants, failures); err != nil {
 		return false
 	}
 
@@ -881,19 +877,50 @@ func (p *Postgres) getRun(ctx context.Context, id string) (RunRecord, bool) {
 }
 
 func (p *Postgres) getReport(ctx context.Context, runID string) (report.Report, bool) {
-	var raw []byte
+	var (
+		status     string
+		summary    []byte
+		thresholds []byte
+		invariants []byte
+		failures   []byte
+	)
 	err := p.db.QueryRowContext(ctx, `
-		SELECT raw_report
+		SELECT status::text, summary, thresholds, invariants, failures
 		FROM reports
 		WHERE run_id = $1
-	`, runID).Scan(&raw)
+	`, runID).Scan(&status, &summary, &thresholds, &invariants, &failures)
 	if err != nil {
 		return report.Report{}, false
 	}
+
 	var rep report.Report
-	if err := json.Unmarshal(raw, &rep); err != nil {
-		return report.Report{}, false
+	rep.RunID = runID
+	rep.Status = report.Status(status)
+
+	var scSnapshot []byte
+	var scenarioVersionID string
+	var scenarioVersionNum int
+	err = p.db.QueryRowContext(ctx, `
+		SELECT scenario_snapshot, scenario_version_id::text, scenario_version_number
+		FROM runs
+		WHERE id = $1
+	`, runID).Scan(&scSnapshot, &scenarioVersionID, &scenarioVersionNum)
+	if err == nil {
+		var sc struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(scSnapshot, &sc); err == nil {
+			rep.Scenario = sc.Name
+		}
+		rep.ScenarioVersionID = scenarioVersionID
+		rep.ScenarioVersionNumber = scenarioVersionNum
 	}
+
+	_ = json.Unmarshal(summary, &rep.Summary)
+	_ = json.Unmarshal(thresholds, &rep.Thresholds)
+	_ = json.Unmarshal(invariants, &rep.Invariants)
+	_ = json.Unmarshal(failures, &rep.Failures)
+
 	return rep, true
 }
 

@@ -776,14 +776,14 @@ func newAPIServerWithStoreAndQueue(t *testing.T, cfg config.Config, st store.Sto
 		RunTimeout:   cfg.RunTimeout,
 		MaxBodyBytes: cfg.MaxBodyBytes,
 		Guardrails:   cfg.Guardrails,
-	}, st, runner.New())
+	}, st, nil, runner.New())
 	if queue != nil {
 		srv = httpapi.NewWithQueue(config.Config{
 			Addr:         cfg.Addr,
 			RunTimeout:   cfg.RunTimeout,
 			MaxBodyBytes: cfg.MaxBodyBytes,
 			Guardrails:   cfg.Guardrails,
-		}, st, runner.New(), queue)
+		}, st, nil, runner.New(), queue)
 	}
 
 	api := httptest.NewServer(srv.Handler())
