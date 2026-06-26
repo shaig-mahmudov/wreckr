@@ -91,7 +91,10 @@ function bodyFor(request) {
 }
 
 function runRequest(request) {
-  const params = { headers: headers(request.headers) };
+  const params = {
+    headers: headers(request.headers),
+    tags: { name: request.name, phase: request.phase || 'request' }
+  };
   const body = bodyFor(request);
   if (request.json !== undefined && params.headers['Content-Type'] === undefined) {
     params.headers['Content-Type'] = 'application/json';
@@ -112,7 +115,7 @@ func writeLifecycle(b *strings.Builder, name string, requests []scenario.Request
 		return
 	}
 	fmt.Fprintf(b, "export function %s() {\n", name)
-	fmt.Fprintf(b, "  const requests = %s;\n", jsValue(k6Requests(requests)))
+	fmt.Fprintf(b, "  const requests = %s;\n", jsValue(k6Requests(requests, name)))
 	b.WriteString("  for (const request of requests) {\n")
 	b.WriteString("    runRequest(request);\n")
 	b.WriteString("  }\n")
@@ -121,7 +124,7 @@ func writeLifecycle(b *strings.Builder, name string, requests []scenario.Request
 
 func writeDefault(b *strings.Builder, sc scenario.Scenario) {
 	fmt.Fprintf(b, "export default function () {\n")
-	fmt.Fprintf(b, "  const requests = %s;\n", jsValue(k6Requests(sc.Requests)))
+	fmt.Fprintf(b, "  const requests = %s;\n", jsValue(k6Requests(sc.Requests, "request")))
 	if sc.Traffic.Type == scenario.TrafficRetryStorm {
 		attempts := sc.Traffic.Retry.Attempts
 		if attempts <= 0 {
@@ -168,6 +171,23 @@ func k6Iterations(sc scenario.Scenario) int {
 	return sc.Traffic.Iterations
 }
 
+func statusCodesToTrack(req scenario.Request) []int {
+	codes := []int{0, 200, 201, 204, 400, 401, 403, 404, 409, 500, 502, 503, 504}
+	for _, c := range req.Expect.Status {
+		found := false
+		for _, existing := range codes {
+			if existing == c {
+				found = true
+				break
+			}
+		}
+		if !found {
+			codes = append(codes, c)
+		}
+	}
+	return codes
+}
+
 func k6Thresholds(sc scenario.Scenario) map[string][]string {
 	out := map[string][]string{}
 	if sc.Thresholds.P95MS != nil {
@@ -176,6 +196,26 @@ func k6Thresholds(sc scenario.Scenario) map[string][]string {
 	if sc.Thresholds.MaxErrorRate != nil {
 		successRate := 1 - *sc.Thresholds.MaxErrorRate
 		out["checks"] = append(out["checks"], fmt.Sprintf("rate>=%.4f", successRate))
+	}
+
+	// Add dummy thresholds for status code tracking per request name and status code
+	for _, req := range sc.Setup {
+		for _, code := range statusCodesToTrack(req) {
+			key := fmt.Sprintf("http_reqs{name:%q,status:%d}", req.Name, code)
+			out[key] = []string{"count>=0"}
+		}
+	}
+	for _, req := range sc.Requests {
+		for _, code := range statusCodesToTrack(req) {
+			key := fmt.Sprintf("http_reqs{name:%q,status:%d}", req.Name, code)
+			out[key] = []string{"count>=0"}
+		}
+	}
+	for _, req := range sc.Teardown {
+		for _, code := range statusCodesToTrack(req) {
+			key := fmt.Sprintf("http_reqs{name:%q,status:%d}", req.Name, code)
+			out[key] = []string{"count>=0"}
+		}
 	}
 	return out
 }
@@ -188,9 +228,10 @@ type compiledRequest struct {
 	JSON             any               `json:"json,omitempty"`
 	Body             string            `json:"body,omitempty"`
 	ExpectedStatuses []int             `json:"expected_statuses"`
+	Phase            string            `json:"phase,omitempty"`
 }
 
-func k6Requests(requests []scenario.Request) []compiledRequest {
+func k6Requests(requests []scenario.Request, phase string) []compiledRequest {
 	out := make([]compiledRequest, 0, len(requests))
 	for _, req := range requests {
 		compiled := compiledRequest{
@@ -200,6 +241,7 @@ func k6Requests(requests []scenario.Request) []compiledRequest {
 			Headers:          req.Headers,
 			Body:             req.Body,
 			ExpectedStatuses: req.Expect.Status,
+			Phase:            phase,
 		}
 		if len(req.JSON) > 0 {
 			var body any

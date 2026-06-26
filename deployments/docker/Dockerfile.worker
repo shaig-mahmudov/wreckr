@@ -8,6 +8,8 @@ RUN go build -o /out/wreckr-worker ./apps/api/cmd/worker
 
 FROM alpine:3.21
 
+COPY --from=grafana/k6:latest /usr/bin/k6 /usr/bin/k6
+
 RUN adduser -D -H wreckr
 USER wreckr
 WORKDIR /app

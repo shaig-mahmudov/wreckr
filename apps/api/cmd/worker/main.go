@@ -43,8 +43,19 @@ func main() {
 		},
 	)
 
+	var r runner.ScenarioRunner = runner.New()
+	if cfg.RunnerEngine == "k6" {
+		r = runner.NewK6Runner()
+	}
+
 	mux := asynq.NewServeMux()
-	workerHandler.Register(mux)
+	worker.Handler{
+		Executor: runexec.Executor{
+			Store:   st,
+			Runner:  r,
+			Timeout: cfg.RunTimeout,
+		},
+	}.Register(mux)
 
 	log.Printf("wreckr worker listening on redis %s with concurrency %d", cfg.RedisAddr, concurrency)
 	if err := server.Run(mux); err != nil {
