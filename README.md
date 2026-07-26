@@ -190,3 +190,12 @@ Target backend
 See [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the staged implementation plan.
 
 See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the current implementation state, known gaps, and recommended next milestones.
+
+## Documentation Reference
+
+- **[Architectural Decisions (ADRs)](docs/DECISIONS.md):** An index of important architectural and product decisions (each migrated to individual detailed ADRs in `docs/ADR/`).
+- **[Database Schema & Persistence](docs/DATABASE.md):** Detailed guide on the PostgreSQL store, tables, indexes, and migrations.
+- **[Run Guardrails & Security](docs/GUARDRAILS.md):** Technical details on the security and traffic rate-limiting validation layers.
+- **[Object Storage & DB Offloading](docs/OBJECT_STORAGE.md):** Architectural guide on using S3-compatible Blob Stores to archive large test report artifacts.
+- **[k6 Execution & Compiler](docs/K6_INTEGRATION.md):** Detailed overview of compiling Wreckr JSON scenarios to JavaScript-based k6 scripts and execution.
+
