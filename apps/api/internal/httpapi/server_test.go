@@ -783,7 +783,7 @@ func newAPIServerWithStoreAndQueue(t *testing.T, cfg config.Config, st store.Sto
 			RunTimeout:   cfg.RunTimeout,
 			MaxBodyBytes: cfg.MaxBodyBytes,
 			Guardrails:   cfg.Guardrails,
-		}, st, nil, runner.New(), queue)
+		}, st, nil, runner.New(), queue, nil)
 	}
 
 	api := httptest.NewServer(srv.Handler())
