@@ -664,11 +664,33 @@ func (p *Postgres) ListRuns() []RunRecord {
 	ctx, cancel := storeContext()
 	defer cancel()
 
+	// ⚡ Bolt: Optimized ListRuns to eliminate an N+1 query bottleneck.
+	// Previously, this function iterated over a list of IDs and called GetRun for each,
+	// resulting in multiple database roundtrips per row. Now it uses a single query
+	// with LEFT JOINs to fetch the run records and their associated reports efficiently.
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT id::text
+		SELECT
+			runs.id::text,
+			COALESCE(runs.target_id::text, ''),
+			COALESCE(runs.scenario_id::text, ''),
+			COALESCE(runs.scenario_version_id::text, ''),
+			COALESCE(sv.version_number, 0),
+			runs.status::text,
+			runs.scenario_snapshot,
+			runs.error,
+			runs.created_at,
+			runs.started_at,
+			runs.finished_at,
+			rep.status::text,
+			rep.summary,
+			rep.thresholds,
+			rep.invariants,
+			rep.failures
 		FROM runs
-		WHERE project_id = $1
-		ORDER BY created_at DESC
+		LEFT JOIN scenario_versions sv ON sv.id = runs.scenario_version_id
+		LEFT JOIN reports rep ON rep.run_id = runs.id
+		WHERE runs.project_id = $1
+		ORDER BY runs.created_at DESC
 	`, p.projectID)
 	if err != nil {
 		return nil
@@ -677,14 +699,75 @@ func (p *Postgres) ListRuns() []RunRecord {
 
 	var records []RunRecord
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var record RunRecord
+		var raw []byte
+		var startedAt sql.NullTime
+		var finishedAt sql.NullTime
+		var errorText sql.NullString
+
+		var repStatus sql.NullString
+		var repSummary []byte
+		var repThresholds []byte
+		var repInvariants []byte
+		var repFailures []byte
+
+		if err := rows.Scan(
+			&record.ID,
+			&record.TargetID,
+			&record.ScenarioID,
+			&record.ScenarioVersionID,
+			&record.ScenarioVersionNumber,
+			&record.Status,
+			&raw,
+			&errorText,
+			&record.CreatedAt,
+			&startedAt,
+			&finishedAt,
+			&repStatus,
+			&repSummary,
+			&repThresholds,
+			&repInvariants,
+			&repFailures,
+		); err != nil {
 			return nil
 		}
-		record, ok := p.GetRun(id)
-		if !ok {
-			return nil
+
+		if err := json.Unmarshal(raw, &record.Scenario); err != nil {
+			continue
 		}
+		if errorText.Valid {
+			record.Error = errorText.String
+		}
+		if startedAt.Valid {
+			record.StartedAt = &startedAt.Time
+		}
+		if finishedAt.Valid {
+			record.FinishedAt = &finishedAt.Time
+		}
+
+		if repStatus.Valid {
+			rep := report.Report{
+				RunID:                 record.ID,
+				Status:                report.Status(repStatus.String),
+				Scenario:              record.Scenario.Name,
+				ScenarioVersionID:     record.ScenarioVersionID,
+				ScenarioVersionNumber: record.ScenarioVersionNumber,
+			}
+			if len(repSummary) > 0 {
+				_ = json.Unmarshal(repSummary, &rep.Summary)
+			}
+			if len(repThresholds) > 0 {
+				_ = json.Unmarshal(repThresholds, &rep.Thresholds)
+			}
+			if len(repInvariants) > 0 {
+				_ = json.Unmarshal(repInvariants, &rep.Invariants)
+			}
+			if len(repFailures) > 0 {
+				_ = json.Unmarshal(repFailures, &rep.Failures)
+			}
+			record.Report = &rep
+		}
+
 		records = append(records, record)
 	}
 	return records
