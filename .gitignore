@@ -22,6 +22,10 @@ artifacts/
 tmp/
 wreckr-report*.json
 
+# Playwright
+playwright-report/
+test-results/
+
 # Docker / editor
 docker-compose.override.yml
 .idea/
