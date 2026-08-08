@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/wreckr/wreckr/apps/api/internal/blob"
 	"github.com/wreckr/wreckr/apps/api/internal/config"
 	"github.com/wreckr/wreckr/apps/api/internal/guardrails"
@@ -71,7 +73,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/runs/{id}/events", s.getRunEvents)
 	mux.HandleFunc("GET /v1/runs/{id}/events/stream", s.streamRunEvents)
 	mux.HandleFunc("GET /v1/runs/", s.getRun)
-	return withCORS(withJSON(mux))
+
+	handler := withCORS(withJSON(mux))
+	handler = otelhttp.NewHandler(handler, "wreckr-api")
+
+	return handler
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {

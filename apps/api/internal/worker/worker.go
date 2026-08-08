@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/hibiken/asynq"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/wreckr/wreckr/apps/api/internal/runevent"
 	"github.com/wreckr/wreckr/apps/api/internal/runexec"
@@ -27,19 +29,31 @@ func (h Handler) Register(mux *asynq.ServeMux) {
 }
 
 func (h Handler) handleRunExecute(ctx context.Context, task *asynq.Task) error {
+	tracer := otel.Tracer("worker")
+	ctx, span := tracer.Start(ctx, "Worker Run Execute")
+	defer span.End()
+
 	payload, err := runqueue.DecodeRunPayload(task)
 	if err != nil {
+		span.RecordError(err)
 		return fmt.Errorf("decode run task: %w", err)
 	}
 	if payload.RunID == "" {
-		return fmt.Errorf("run task missing run_id")
+		err = fmt.Errorf("run task missing run_id")
+		span.RecordError(err)
+		return err
 	}
+	span.SetAttributes(attribute.String("run_id", payload.RunID))
 	h.recordWorkerEvent(ctx, task, payload.RunID, runevent.Event{
 		Level:   runevent.LevelInfo,
 		Type:    runevent.TypeWorkerAttemptStarted,
 		Message: "worker attempt started",
 	})
-	return h.Executor.Execute(ctx, payload.RunID)
+	err = h.Executor.Execute(ctx, payload.RunID)
+	if err != nil {
+		span.RecordError(err)
+	}
+	return err
 }
 
 func (h Handler) HandleError(ctx context.Context, task *asynq.Task, err error) {

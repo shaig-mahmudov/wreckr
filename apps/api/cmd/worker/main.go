@@ -11,11 +11,24 @@ import (
 	"github.com/wreckr/wreckr/apps/api/internal/runexec"
 	"github.com/wreckr/wreckr/apps/api/internal/runner"
 	"github.com/wreckr/wreckr/apps/api/internal/runqueue"
+	"github.com/wreckr/wreckr/apps/api/internal/telemetry"
 	"github.com/wreckr/wreckr/apps/api/internal/worker"
 )
 
 func main() {
 	cfg := config.FromEnv()
+	ctx := context.Background()
+
+	tp, err := telemetry.InitTracer(ctx, "wreckr-worker")
+	if err != nil {
+		log.Printf("failed to initialize tracer: %v", err)
+	} else {
+		defer func() {
+			if err := tp.Shutdown(ctx); err != nil {
+				log.Printf("Error shutting down tracer provider: %v", err)
+			}
+		}()
+	}
 	st, err := app.OpenStore(cfg)
 	if err != nil {
 		log.Fatal(err)
