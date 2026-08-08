@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/wreckr/wreckr/apps/api/internal/blob"
 	"github.com/wreckr/wreckr/apps/api/internal/config"
 	"github.com/wreckr/wreckr/apps/api/internal/guardrails"
@@ -70,6 +72,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/runs/{id}/cancel", s.cancelRun)
 	mux.HandleFunc("GET /v1/runs/{id}/events", s.getRunEvents)
 	mux.HandleFunc("GET /v1/runs/{id}/events/stream", s.streamRunEvents)
+	mux.HandleFunc("GET /v1/runs/{id}/events/stream/ws", s.streamRunEventsWS)
 	mux.HandleFunc("GET /v1/runs/", s.getRun)
 	return withCORS(withJSON(mux))
 }
@@ -478,6 +481,68 @@ func (s *Server) streamRunEvents(w http.ResponseWriter, r *http.Request) {
 
 		select {
 		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Allow all origins for the API, same as CORS config
+	},
+}
+
+func (s *Server) streamRunEventsWS(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, ok := s.store.GetRun(id); !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("run %q not found", id))
+		return
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		// upgrader.Upgrade already replies with an error
+		return
+	}
+	defer conn.Close()
+
+	// We handle reading to manage close/ping events
+	closeChan := make(chan struct{})
+	go func() {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				close(closeChan)
+				break
+			}
+		}
+	}()
+
+	lastSequence := lastEventSequence(r)
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		events := s.store.ListRunEvents(id)
+		for _, event := range events {
+			if event.Sequence <= lastSequence {
+				continue
+			}
+			if err := conn.WriteJSON(event); err != nil {
+				return
+			}
+			lastSequence = event.Sequence
+		}
+
+		record, ok := s.store.GetRun(id)
+		if !ok || isTerminalRunStatus(record.Status) || hasTerminalEvent(events) {
+			return
+		}
+
+		select {
+		case <-r.Context().Done():
+			return
+		case <-closeChan:
 			return
 		case <-ticker.C:
 		}

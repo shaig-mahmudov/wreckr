@@ -133,7 +133,7 @@ export function RunConsole() {
 
     const runID = selectedRunID;
     let closed = false;
-    let source: EventSource | null = null;
+    let ws: WebSocket | null = null;
     const baseURL = apiURL.replace(/\/$/, "");
 
     async function connect() {
@@ -149,25 +149,53 @@ export function RunConsole() {
           return;
         }
 
-        source = new EventSource(`${baseURL}/v1/runs/${runID}/events/stream`);
-        for (const eventType of streamEventTypes) {
-          source.addEventListener(eventType, (message) => {
-            const event = JSON.parse((message as MessageEvent).data) as RunEvent;
-            appendRunEvent(event);
-            if (terminalEventTypes.has(event.type)) {
-              source?.close();
-              void refreshRuns(runID);
-            }
-          });
+        let maxSequence = 0;
+        if (persistedEvents.length > 0) {
+          maxSequence = Math.max(...persistedEvents.map(e => e.sequence));
         }
-        source.onerror = () => {
-          if (closed) {
-            source?.close();
+
+        const urlObj = new URL(baseURL, window.location.href);
+        urlObj.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        urlObj.pathname = `${urlObj.pathname === "/" ? "" : urlObj.pathname}/v1/runs/${runID}/events/stream/ws`;
+        if (maxSequence > 0) {
+          urlObj.searchParams.set("after", maxSequence.toString());
+        }
+        const wsURL = urlObj.toString();
+
+        ws = new WebSocket(wsURL);
+        ws.onmessage = (message) => {
+          const event = JSON.parse(message.data) as RunEvent;
+          appendRunEvent(event);
+          if (terminalEventTypes.has(event.type)) {
+            closed = true;
+            ws?.close();
+            void refreshRuns(runID);
           }
         };
+        ws.onerror = () => {
+          if (!closed) {
+             console.error("WebSocket error");
+          }
+        };
+        ws.onclose = () => {
+          if (!closed) {
+             console.log("WebSocket connection closed, reconnecting...");
+             setTimeout(() => {
+               if (!closed) {
+                 void connect();
+               }
+             }, 1000);
+          }
+        }
       } catch (err) {
         if (!closed) {
           setError(err instanceof Error ? err.message : "Could not load run events.");
+          // Also reconnect on error from initial fetch
+          setTimeout(() => {
+            if (!closed) {
+              void connect();
+            }
+          }, 3000);
         }
       }
     }
@@ -175,7 +203,7 @@ export function RunConsole() {
     void connect();
     return () => {
       closed = true;
-      source?.close();
+      ws?.close();
     };
   }, [apiURL, selectedRunID]);
 
