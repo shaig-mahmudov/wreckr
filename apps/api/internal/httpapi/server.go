@@ -28,6 +28,7 @@ type Server struct {
 	blobStore blob.Store
 	runner    *runner.Runner
 	queue     runqueue.Enqueuer
+	inspector runqueue.QueueInspector
 
 	cancelMu       sync.Mutex
 	runCancels     map[string]context.CancelFunc
@@ -35,16 +36,17 @@ type Server struct {
 }
 
 func New(cfg config.Config, st store.Store, bs blob.Store, rn *runner.Runner) *Server {
-	return NewWithQueue(cfg, st, bs, rn, nil)
+	return NewWithQueue(cfg, st, bs, rn, nil, nil)
 }
 
-func NewWithQueue(cfg config.Config, st store.Store, bs blob.Store, rn *runner.Runner, queue runqueue.Enqueuer) *Server {
+func NewWithQueue(cfg config.Config, st store.Store, bs blob.Store, rn *runner.Runner, queue runqueue.Enqueuer, inspector runqueue.QueueInspector) *Server {
 	return &Server{
 		cfg:            cfg,
 		store:          st,
 		blobStore:      bs,
 		runner:         rn,
 		queue:          queue,
+		inspector:      inspector,
 		runCancels:     map[string]context.CancelFunc{},
 		cancelRequests: map[string]struct{}{},
 	}
@@ -71,6 +73,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/runs/{id}/events", s.getRunEvents)
 	mux.HandleFunc("GET /v1/runs/{id}/events/stream", s.streamRunEvents)
 	mux.HandleFunc("GET /v1/runs/", s.getRun)
+	mux.HandleFunc("GET /v1/queue/deadletter", s.listDeadletterTasks)
+	mux.HandleFunc("POST /v1/queue/tasks/{id}/retry", s.retryDeadletterTask)
+	mux.HandleFunc("DELETE /v1/queue/tasks/{id}", s.deleteDeadletterTask)
 	return withCORS(withJSON(mux))
 }
 
@@ -722,4 +727,82 @@ func withCORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+type TaskInfoResponse struct {
+	ID           string    `json:"id"`
+	Queue        string    `json:"queue"`
+	Type         string    `json:"type"`
+	State        string    `json:"state"`
+	MaxRetry     int       `json:"max_retry"`
+	Retried      int       `json:"retried"`
+	LastErr      string    `json:"last_err"`
+	LastFailedAt time.Time `json:"last_failed_at"`
+	Payload      string    `json:"payload"`
+}
+
+func (s *Server) listDeadletterTasks(w http.ResponseWriter, r *http.Request) {
+	if s.inspector == nil {
+		writeError(w, http.StatusNotImplemented, errors.New("queue inspector not configured"))
+		return
+	}
+
+	limit := 100
+	tasks, err := s.inspector.ListArchivedTasks(runqueue.QueueRuns, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	res := make([]TaskInfoResponse, len(tasks))
+	for i, t := range tasks {
+		res[i] = TaskInfoResponse{
+			ID:           t.ID,
+			Queue:        t.Queue,
+			Type:         t.Type,
+			State:        t.State.String(),
+			MaxRetry:     t.MaxRetry,
+			Retried:      t.Retried,
+			LastErr:      t.LastErr,
+			LastFailedAt: t.LastFailedAt,
+			Payload:      string(t.Payload),
+		}
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) retryDeadletterTask(w http.ResponseWriter, r *http.Request) {
+	if s.inspector == nil {
+		writeError(w, http.StatusNotImplemented, errors.New("queue inspector not configured"))
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, errors.New("task id required"))
+		return
+	}
+	err := s.inspector.RunTask(runqueue.QueueRuns, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) deleteDeadletterTask(w http.ResponseWriter, r *http.Request) {
+	if s.inspector == nil {
+		writeError(w, http.StatusNotImplemented, errors.New("queue inspector not configured"))
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, errors.New("task id required"))
+		return
+	}
+	err := s.inspector.DeleteTask(runqueue.QueueRuns, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
