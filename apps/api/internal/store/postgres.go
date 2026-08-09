@@ -665,10 +665,23 @@ func (p *Postgres) ListRuns() []RunRecord {
 	defer cancel()
 
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT id::text
+		SELECT runs.id::text,
+			COALESCE(runs.target_id::text, ''),
+			COALESCE(runs.scenario_id::text, ''),
+			COALESCE(runs.scenario_version_id::text, ''),
+			COALESCE(sv.version_number, 0),
+			runs.status::text,
+			runs.scenario_snapshot,
+			runs.error,
+			runs.created_at,
+			runs.started_at,
+			runs.finished_at,
+			r.status::text, r.summary, r.thresholds, r.invariants, r.failures
 		FROM runs
-		WHERE project_id = $1
-		ORDER BY created_at DESC
+		LEFT JOIN scenario_versions sv ON sv.id = runs.scenario_version_id
+		LEFT JOIN reports r ON r.run_id = runs.id
+		WHERE runs.project_id = $1
+		ORDER BY runs.created_at DESC
 	`, p.projectID)
 	if err != nil {
 		return nil
@@ -677,13 +690,71 @@ func (p *Postgres) ListRuns() []RunRecord {
 
 	var records []RunRecord
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var record RunRecord
+		var raw []byte
+		var startedAt sql.NullTime
+		var finishedAt sql.NullTime
+		var errorText sql.NullString
+		var rStatus sql.NullString
+		var rSummary []byte
+		var rThresholds []byte
+		var rInvariants []byte
+		var rFailures []byte
+
+		if err := rows.Scan(
+			&record.ID,
+			&record.TargetID,
+			&record.ScenarioID,
+			&record.ScenarioVersionID,
+			&record.ScenarioVersionNumber,
+			&record.Status,
+			&raw,
+			&errorText,
+			&record.CreatedAt,
+			&startedAt,
+			&finishedAt,
+			&rStatus,
+			&rSummary,
+			&rThresholds,
+			&rInvariants,
+			&rFailures,
+		); err != nil {
 			return nil
 		}
-		record, ok := p.GetRun(id)
-		if !ok {
-			return nil
+		if err := json.Unmarshal(raw, &record.Scenario); err != nil {
+			continue
+		}
+		if errorText.Valid {
+			record.Error = errorText.String
+		}
+		if startedAt.Valid {
+			record.StartedAt = &startedAt.Time
+		}
+		if finishedAt.Valid {
+			record.FinishedAt = &finishedAt.Time
+		}
+
+		if rStatus.Valid {
+			rep := report.Report{
+				RunID:                 record.ID,
+				Status:                report.Status(rStatus.String),
+				Scenario:              record.Scenario.Name,
+				ScenarioVersionID:     record.ScenarioVersionID,
+				ScenarioVersionNumber: record.ScenarioVersionNumber,
+			}
+			if len(rSummary) > 0 {
+				_ = json.Unmarshal(rSummary, &rep.Summary)
+			}
+			if len(rThresholds) > 0 {
+				_ = json.Unmarshal(rThresholds, &rep.Thresholds)
+			}
+			if len(rInvariants) > 0 {
+				_ = json.Unmarshal(rInvariants, &rep.Invariants)
+			}
+			if len(rFailures) > 0 {
+				_ = json.Unmarshal(rFailures, &rep.Failures)
+			}
+			record.Report = &rep
 		}
 		records = append(records, record)
 	}
