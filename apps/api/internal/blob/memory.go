@@ -20,7 +20,7 @@ func NewMemoryStore() *MemoryStore {
 func (m *MemoryStore) Put(ctx context.Context, key string, data []byte, contentType string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// Copy data to prevent mutation
 	copied := make([]byte, len(data))
 	copy(copied, data)

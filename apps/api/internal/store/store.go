@@ -26,7 +26,7 @@ type Store interface {
 		sc scenario.Scenario,
 		versionRef ...ScenarioVersionRecord,
 	) RunRecord
-  
+
 	MarkRunStarted(id string)
 	CompleteRun(id string, rep report.Report)
 	CancelRun(id string, rep report.Report)
