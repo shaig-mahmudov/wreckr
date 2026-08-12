@@ -664,11 +664,31 @@ func (p *Postgres) ListRuns() []RunRecord {
 	ctx, cancel := storeContext()
 	defer cancel()
 
+	// ⚡ Bolt: Performance optimization
+	// Replaced N+1 query pattern (looping over GetRun) with a single query using LEFT JOINs.
+	// Expected impact: O(1) database queries instead of O(N) (specifically 1 query instead of 1 + 3N).
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT id::text
+		SELECT runs.id::text,
+			COALESCE(runs.target_id::text, ''),
+			COALESCE(runs.scenario_id::text, ''),
+			COALESCE(runs.scenario_version_id::text, ''),
+			COALESCE(sv.version_number, 0),
+			runs.status::text,
+			runs.scenario_snapshot,
+			runs.error,
+			runs.created_at,
+			runs.started_at,
+			runs.finished_at,
+			reports.status::text,
+			reports.summary,
+			reports.thresholds,
+			reports.invariants,
+			reports.failures
 		FROM runs
-		WHERE project_id = $1
-		ORDER BY created_at DESC
+		LEFT JOIN scenario_versions sv ON sv.id = runs.scenario_version_id
+		LEFT JOIN reports ON reports.run_id = runs.id
+		WHERE runs.project_id = $1
+		ORDER BY runs.created_at DESC
 	`, p.projectID)
 	if err != nil {
 		return nil
@@ -677,14 +697,82 @@ func (p *Postgres) ListRuns() []RunRecord {
 
 	var records []RunRecord
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var record RunRecord
+		var raw []byte
+		var startedAt sql.NullTime
+		var finishedAt sql.NullTime
+		var errorText sql.NullString
+
+		var repStatus sql.NullString
+		var summary []byte
+		var thresholds []byte
+		var invariants []byte
+		var failures []byte
+
+		if err := rows.Scan(
+			&record.ID,
+			&record.TargetID,
+			&record.ScenarioID,
+			&record.ScenarioVersionID,
+			&record.ScenarioVersionNumber,
+			&record.Status,
+			&raw,
+			&errorText,
+			&record.CreatedAt,
+			&startedAt,
+			&finishedAt,
+			&repStatus,
+			&summary,
+			&thresholds,
+			&invariants,
+			&failures,
+		); err != nil {
 			return nil
 		}
-		record, ok := p.GetRun(id)
-		if !ok {
+
+		if err := json.Unmarshal(raw, &record.Scenario); err != nil {
 			return nil
 		}
+		if errorText.Valid {
+			record.Error = errorText.String
+		}
+		if startedAt.Valid {
+			record.StartedAt = &startedAt.Time
+		}
+		if finishedAt.Valid {
+			record.FinishedAt = &finishedAt.Time
+		}
+
+		if repStatus.Valid {
+			var rep report.Report
+			rep.RunID = record.ID
+			rep.Status = report.Status(repStatus.String)
+
+			var sc struct {
+				Name string `json:"name"`
+			}
+			if err := json.Unmarshal(raw, &sc); err == nil {
+				rep.Scenario = sc.Name
+			}
+			rep.ScenarioVersionID = record.ScenarioVersionID
+			rep.ScenarioVersionNumber = record.ScenarioVersionNumber
+
+			if len(summary) > 0 {
+				_ = json.Unmarshal(summary, &rep.Summary)
+			}
+			if len(thresholds) > 0 {
+				_ = json.Unmarshal(thresholds, &rep.Thresholds)
+			}
+			if len(invariants) > 0 {
+				_ = json.Unmarshal(invariants, &rep.Invariants)
+			}
+			if len(failures) > 0 {
+				_ = json.Unmarshal(failures, &rep.Failures)
+			}
+
+			record.Report = &rep
+		}
+
 		records = append(records, record)
 	}
 	return records
