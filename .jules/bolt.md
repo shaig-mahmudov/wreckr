@@ -1,0 +1,3 @@
+## 2024-05-14 - Go backend manual scan N+1 query patterns
+**Learning:** The Go backend uses manual `database/sql` scanning without an ORM. This can lead to N+1 queries when lists of entities are fetched, such as in `ListRuns`, because the developer might naturally reuse `GetRun` inside a loop instead of writing a more complex `LEFT JOIN` query for the list operation.
+**Action:** Always inspect list fetching methods (e.g. `List*`) in store implementations to ensure they don't iterate over rows and call single-entity fetching methods inside the loop. Convert them to single SQL queries with `LEFT JOIN`s.
