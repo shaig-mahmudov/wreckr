@@ -1,0 +1,3 @@
+## 2025-02-18 - Fix N+1 query in raw SQL ListRuns
+**Learning:** The Go backend uses raw `database/sql` mapping, which occasionally leads to N+1 query anti-patterns if `ListX` methods loop and call `GetX`. Specifically, `ListRuns` was executing a separate query for each row to fetch scenario versions and reports, scaling poorly to $O(N)$.
+**Action:** Always scan for loops containing database queries inside `List` functions. When found, combine the fetching using `LEFT JOIN` and manual scanning to achieve $O(1)$ query overhead. Avoid using `sql.RawBytes` to safely mitigate memory reuse issues while scanning data into variables inside a loop.
