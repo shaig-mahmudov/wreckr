@@ -1,0 +1,3 @@
+## 2024-05-24 - [Avoid N+1 query loops in Postgres Store Lists]
+**Learning:** In the Go backend `database/sql` layer, some `List*` methods (like `ListRuns`) were implemented by looping over primary keys and calling `Get*` for each one, which internally called multiple other queries per ID, leading to massive N+1 query cascades (e.g., O(N) becoming 1 + N*3 queries).
+**Action:** Always rewrite `List*` methods to use a single query with `LEFT JOIN` and scan directly into the model struct instead of looping over rows to call separate functions. This applies especially to relational records like Runs and Reports that are bound together.
