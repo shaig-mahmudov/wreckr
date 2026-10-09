@@ -33,6 +33,7 @@ type Store interface {
 	ErrorRun(id string, err error)
 	GetRun(id string) (RunRecord, bool)
 	ListRuns() []RunRecord
+	CountRunsByStatus() (map[RunStatus]int, int)
 	RequestRunCancel(id string) bool
 	IsRunCancelRequested(id string) bool
 	AppendRunEvent(runID string, event runevent.Event) runevent.Event

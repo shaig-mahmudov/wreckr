@@ -660,6 +660,39 @@ func (p *Postgres) GetRun(id string) (RunRecord, bool) {
 	return record, true
 }
 
+func (p *Postgres) CountRunsByStatus() (map[RunStatus]int, int) {
+	ctx, cancel := storeContext()
+	defer cancel()
+
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT status::text, count(*)
+		FROM runs
+		WHERE project_id = $1
+		GROUP BY status
+	`, p.projectID)
+
+	counts := make(map[RunStatus]int)
+	if err != nil {
+		return counts, 0
+	}
+	defer rows.Close()
+
+	var total int
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return counts, total
+		}
+		counts[RunStatus(status)] = count
+		total += count
+	}
+	if err := rows.Err(); err != nil {
+		return counts, total
+	}
+	return counts, total
+}
+
 func (p *Postgres) ListRuns() []RunRecord {
 	ctx, cancel := storeContext()
 	defer cancel()

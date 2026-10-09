@@ -403,6 +403,16 @@ func (m *Memory) ListRuns() []RunRecord {
 	return out
 }
 
+func (m *Memory) CountRunsByStatus() (map[RunStatus]int, int) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	counts := make(map[RunStatus]int)
+	for _, record := range m.runs {
+		counts[record.Status]++
+	}
+	return counts, len(m.runs)
+}
+
 func (m *Memory) RequestRunCancel(id string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
