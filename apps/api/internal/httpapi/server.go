@@ -84,29 +84,15 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	runs := s.store.ListRuns()
-	var active, passed, failed, errored, canceled int
-	for _, run := range runs {
-		switch run.Status {
-		case store.RunRunning, store.RunQueued:
-			active++
-		case store.RunPassed:
-			passed++
-		case store.RunFailed:
-			failed++
-		case store.RunErrored:
-			errored++
-		case store.RunCanceled:
-			canceled++
-		}
-	}
+	metrics := s.store.GetRunMetrics()
+
 	fmt.Fprintf(w, "wreckr_api_up 1\n")
-	fmt.Fprintf(w, "wreckr_runs_total %d\n", len(runs))
-	fmt.Fprintf(w, "wreckr_runs_active %d\n", active)
-	fmt.Fprintf(w, "wreckr_runs_passed_total %d\n", passed)
-	fmt.Fprintf(w, "wreckr_runs_failed_total %d\n", failed)
-	fmt.Fprintf(w, "wreckr_runs_errored_total %d\n", errored)
-	fmt.Fprintf(w, "wreckr_runs_canceled_total %d\n", canceled)
+	fmt.Fprintf(w, "wreckr_runs_total %d\n", metrics.Total)
+	fmt.Fprintf(w, "wreckr_runs_active %d\n", metrics.Active)
+	fmt.Fprintf(w, "wreckr_runs_passed_total %d\n", metrics.Passed)
+	fmt.Fprintf(w, "wreckr_runs_failed_total %d\n", metrics.Failed)
+	fmt.Fprintf(w, "wreckr_runs_errored_total %d\n", metrics.Errored)
+	fmt.Fprintf(w, "wreckr_runs_canceled_total %d\n", metrics.Canceled)
 }
 
 type targetRequest struct {

@@ -771,6 +771,38 @@ func (p *Postgres) ListRuns() []RunRecord {
 	return records
 }
 
+func (p *Postgres) GetRunMetrics() RunMetrics {
+	ctx, cancel := storeContext()
+	defer cancel()
+
+	var metrics RunMetrics
+
+	err := p.db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			COUNT(*) FILTER (WHERE status IN ('queued', 'running')),
+			COUNT(*) FILTER (WHERE status = 'passed'),
+			COUNT(*) FILTER (WHERE status = 'failed'),
+			COUNT(*) FILTER (WHERE status = 'errored'),
+			COUNT(*) FILTER (WHERE status = 'canceled')
+		FROM runs
+		WHERE project_id = $1
+	`, p.projectID).Scan(
+		&metrics.Total,
+		&metrics.Active,
+		&metrics.Passed,
+		&metrics.Failed,
+		&metrics.Errored,
+		&metrics.Canceled,
+	)
+
+	if err != nil {
+		return RunMetrics{}
+	}
+
+	return metrics
+}
+
 func (p *Postgres) RequestRunCancel(id string) bool {
 	ctx, cancel := storeContext()
 	defer cancel()
