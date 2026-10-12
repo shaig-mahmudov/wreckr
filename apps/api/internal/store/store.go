@@ -37,4 +37,5 @@ type Store interface {
 	IsRunCancelRequested(id string) bool
 	AppendRunEvent(runID string, event runevent.Event) runevent.Event
 	ListRunEvents(runID string) []runevent.Event
+	GetRunStatusCounts() map[RunStatus]int
 }

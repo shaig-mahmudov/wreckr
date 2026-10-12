@@ -485,3 +485,13 @@ func (m *Memory) isRunCancelRequestedLocked(runID string) bool {
 	}
 	return false
 }
+
+func (m *Memory) GetRunStatusCounts() map[RunStatus]int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	counts := make(map[RunStatus]int)
+	for _, run := range m.runs {
+		counts[run.Status]++
+	}
+	return counts
+}
