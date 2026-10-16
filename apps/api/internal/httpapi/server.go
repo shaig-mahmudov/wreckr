@@ -84,24 +84,15 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	runs := s.store.ListRuns()
-	var active, passed, failed, errored, canceled int
-	for _, run := range runs {
-		switch run.Status {
-		case store.RunRunning, store.RunQueued:
-			active++
-		case store.RunPassed:
-			passed++
-		case store.RunFailed:
-			failed++
-		case store.RunErrored:
-			errored++
-		case store.RunCanceled:
-			canceled++
-		}
-	}
+	totalRuns, statusCounts := s.store.GetRunStatusCounts()
+	active := statusCounts[store.RunRunning] + statusCounts[store.RunQueued]
+	passed := statusCounts[store.RunPassed]
+	failed := statusCounts[store.RunFailed]
+	errored := statusCounts[store.RunErrored]
+	canceled := statusCounts[store.RunCanceled]
+
 	fmt.Fprintf(w, "wreckr_api_up 1\n")
-	fmt.Fprintf(w, "wreckr_runs_total %d\n", len(runs))
+	fmt.Fprintf(w, "wreckr_runs_total %d\n", totalRuns)
 	fmt.Fprintf(w, "wreckr_runs_active %d\n", active)
 	fmt.Fprintf(w, "wreckr_runs_passed_total %d\n", passed)
 	fmt.Fprintf(w, "wreckr_runs_failed_total %d\n", failed)
