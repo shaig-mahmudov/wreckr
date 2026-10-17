@@ -84,24 +84,31 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	runs := s.store.ListRuns()
-	var active, passed, failed, errored, canceled int
-	for _, run := range runs {
-		switch run.Status {
+
+	// ⚡ Bolt: Push aggregation to the database to avoid fetching all runs into memory.
+	// This reduces the /metrics endpoint from O(N) memory/CPU to O(1) memory, preventing
+	// out-of-memory errors and high latency as the number of runs grows.
+	counts := s.store.GetRunStatusCounts()
+
+	var total, active, passed, failed, errored, canceled int
+	for status, count := range counts {
+		total += count
+		switch status {
 		case store.RunRunning, store.RunQueued:
-			active++
+			active += count
 		case store.RunPassed:
-			passed++
+			passed += count
 		case store.RunFailed:
-			failed++
+			failed += count
 		case store.RunErrored:
-			errored++
+			errored += count
 		case store.RunCanceled:
-			canceled++
+			canceled += count
 		}
 	}
+
 	fmt.Fprintf(w, "wreckr_api_up 1\n")
-	fmt.Fprintf(w, "wreckr_runs_total %d\n", len(runs))
+	fmt.Fprintf(w, "wreckr_runs_total %d\n", total)
 	fmt.Fprintf(w, "wreckr_runs_active %d\n", active)
 	fmt.Fprintf(w, "wreckr_runs_passed_total %d\n", passed)
 	fmt.Fprintf(w, "wreckr_runs_failed_total %d\n", failed)
