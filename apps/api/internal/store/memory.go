@@ -10,16 +10,6 @@ import (
 	"github.com/wreckr/wreckr/apps/api/internal/scenario"
 )
 
-type RunStatus string
-
-const (
-	RunQueued   RunStatus = "queued"
-	RunRunning  RunStatus = "running"
-	RunPassed   RunStatus = "passed"
-	RunFailed   RunStatus = "failed"
-	RunErrored  RunStatus = "errored"
-	RunCanceled RunStatus = "canceled"
-)
 
 type TargetEnvironment string
 
@@ -401,6 +391,16 @@ func (m *Memory) ListRuns() []RunRecord {
 		out = append(out, record)
 	}
 	return out
+}
+
+func (m *Memory) GetRunStatusCounts() map[RunStatus]int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	counts := make(map[RunStatus]int)
+	for _, record := range m.runs {
+		counts[record.Status]++
+	}
+	return counts
 }
 
 func (m *Memory) RequestRunCancel(id string) bool {
