@@ -6,6 +6,17 @@ import (
 	"github.com/wreckr/wreckr/apps/api/internal/scenario"
 )
 
+type RunStatus string
+
+const (
+	RunQueued   RunStatus = "queued"
+	RunRunning  RunStatus = "running"
+	RunPassed   RunStatus = "passed"
+	RunFailed   RunStatus = "failed"
+	RunErrored  RunStatus = "errored"
+	RunCanceled RunStatus = "canceled"
+)
+
 type Store interface {
 	CreateTarget(target TargetRecord) TargetRecord
 	UpdateTarget(id string, target TargetRecord) (TargetRecord, bool)
@@ -33,6 +44,7 @@ type Store interface {
 	ErrorRun(id string, err error)
 	GetRun(id string) (RunRecord, bool)
 	ListRuns() []RunRecord
+	GetRunStatusCounts() map[RunStatus]int
 	RequestRunCancel(id string) bool
 	IsRunCancelRequested(id string) bool
 	AppendRunEvent(runID string, event runevent.Event) runevent.Event
