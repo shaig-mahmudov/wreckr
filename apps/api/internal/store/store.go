@@ -6,6 +6,15 @@ import (
 	"github.com/wreckr/wreckr/apps/api/internal/scenario"
 )
 
+type RunMetrics struct {
+	Total    int
+	Active   int
+	Passed   int
+	Failed   int
+	Errored  int
+	Canceled int
+}
+
 type Store interface {
 	CreateTarget(target TargetRecord) TargetRecord
 	UpdateTarget(id string, target TargetRecord) (TargetRecord, bool)
@@ -33,6 +42,7 @@ type Store interface {
 	ErrorRun(id string, err error)
 	GetRun(id string) (RunRecord, bool)
 	ListRuns() []RunRecord
+	GetRunMetrics() RunMetrics
 	RequestRunCancel(id string) bool
 	IsRunCancelRequested(id string) bool
 	AppendRunEvent(runID string, event runevent.Event) runevent.Event
