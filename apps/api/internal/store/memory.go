@@ -393,6 +393,29 @@ func (m *Memory) GetRun(id string) (RunRecord, bool) {
 	return record, ok
 }
 
+func (m *Memory) GetRunMetrics() RunMetrics {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var metrics RunMetrics
+	for _, record := range m.runs {
+		metrics.Total++
+		switch record.Status {
+		case RunQueued, RunRunning:
+			metrics.Active++
+		case RunPassed:
+			metrics.Passed++
+		case RunFailed:
+			metrics.Failed++
+		case RunErrored:
+			metrics.Errored++
+		case RunCanceled:
+			metrics.Canceled++
+		}
+	}
+	return metrics
+}
+
 func (m *Memory) ListRuns() []RunRecord {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
