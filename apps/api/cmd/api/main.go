@@ -25,7 +25,10 @@ func main() {
 	queue := runqueue.NewAsynqEnqueuer(cfg.RedisAddr, cfg.RunTimeout)
 	defer queue.Close()
 
-	server := httpapi.NewWithQueue(cfg, st, blobStore, runner.New(), queue)
+	inspector := runqueue.NewAsynqInspector(cfg.RedisAddr)
+	defer inspector.Close()
+
+	server := httpapi.NewWithQueue(cfg, st, blobStore, runner.New(), queue, inspector)
 
 	log.Printf("wreckr api listening on %s", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, server.Handler()); err != nil {

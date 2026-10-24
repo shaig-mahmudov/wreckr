@@ -284,6 +284,7 @@ export function RunConsole() {
         <div className="topbar-actions">
           <nav className="nav-actions" aria-label="Dashboard navigation">
             <Link href="/scenarios">Scenarios</Link>
+            <Link href="/queues">Queues</Link>
           </nav>
           <div className={`run-state ${statusClass}`}>
             {activeReport?.status === "passed" ? <CheckCircle2 size={18} /> : activeReport?.status === "failed" ? <XCircle size={18} /> : <ServerCrash size={18} />}
