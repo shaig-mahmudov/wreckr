@@ -21,6 +21,7 @@ services:
       WRECKR_S3_SECRET_ACCESS_KEY: minioadmin
       WRECKR_S3_DISABLE_SSL: "true"
       WRECKR_S3_FORCE_PATH_STYLE: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4318"
     ports:
       - "8080:8080"
     depends_on:
@@ -50,6 +51,7 @@ services:
       WRECKR_S3_SECRET_ACCESS_KEY: minioadmin
       WRECKR_S3_DISABLE_SSL: "true"
       WRECKR_S3_FORCE_PATH_STYLE: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4318"
     depends_on:
       postgres:
         condition: service_healthy
@@ -66,6 +68,7 @@ services:
       dockerfile: deployments/docker/Dockerfile.web
     environment:
       NEXT_PUBLIC_WRECKR_API_URL: "http://localhost:8080"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
     ports:
       - "3000:3000"
     depends_on:
@@ -145,6 +148,13 @@ services:
       /usr/bin/mc anonymous set public myminio/wreckr-artifacts;
       exit 0;
       "
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
 
 volumes:
   wreckr-postgres:
